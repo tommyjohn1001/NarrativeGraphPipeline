@@ -42,8 +42,9 @@ else:
     print("Err: Invalid init path. Exiting..")
     sys.exit(1)
 
+
 ## args = bert_model
-path = f"{args.init_path}/_pretrained/BERT/{args.bert_model}/"
+path = f"{args.init_path}/_pretrained/BERT/{args.bert_model}"
 if os.path.exists(path):
     args.bert_model = path
 
@@ -53,25 +54,12 @@ if args.device == "default":
 else:
     args.device = torch.device(args.device)
 
+## args khác
+args.multi_gpus = torch.cuda.device_count() > 0
+
 
 ###############################
 # Cấu hình logging
 ###############################
-logging.basicConfig(format='%(asctime)s: %(message)s', datefmt='%b/%d/%Y %H:%M:%S')
+logging.basicConfig(format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
 logging.getLogger().setLevel(logging.INFO)
-
-
-###############################
-# Cấu hình các biến config
-###############################
-configs = {
-    ## threshold used to select golden passages
-    'DELTA'             : 0.1,
-
-    ## maximum number of characters to be tokenized
-    'MAX_SEQ_LEN_CH'    : 1024,
-    ## maximum number of words to be tokenized
-    'MAX_SEQ_LEN_W'     : 512,
-
-    'MULTI_GPUS'        : True if torch.cuda.device_count() > 0 else False
-}
