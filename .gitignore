@@ -140,6 +140,7 @@ cython_debug/
 # MacOS dumb file
 .DS_Store
 ._*
+*.dump
 
 # Redundant folders
 testing/

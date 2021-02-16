@@ -1,5 +1,6 @@
 '''This file contains code reading raw data and do some preprocessing'''
-from multiprocessing import Pool, Queue
+from collections import defaultdict
+from multiprocessing import Pool
 import glob
 import re
 
@@ -10,23 +11,13 @@ from modules.utils import save_object
 from configs import args, logging
 
 
-def clean_sentence(s:str) -> str:
-    """Clean sentence
+def clean_para(para:str) -> str:
+    para = re.sub(r'\n\t', '', para)
+    para = re.sub(r'\s{2,}', ' ', para)
 
-    Args:
-        s (str): sentence to be cleaned
+    para = para.strip()
 
-    Returns:
-        str: output sentence
-    """
-
-    s = re.sub(r"(\n|\t)", "", s)
-    s = re.sub(r"\s{2,}", " ", s)
-    s = re.sub(r" CUT TO:", "", s)
-    s = re.sub(r"^\s", "", s)
-
-    return s.lower()
-
+    return para.lower()
 
 class DataReading():
     """ This class does the following:
@@ -94,9 +85,13 @@ class DataReading():
         ##########################################
         ## Step 2: Store paragraphs
         ##########################################
+        tmp = defaultdict()
+        for e in list_rawDocuments:
+            tmp[e['id_document']] = e['paragraphs']
+
         logging.info("1.2. Store paragraphs")
 
-        save_object(self.path_rawParagraphs, list_rawDocuments)
+        save_object(self.path_rawParagraphs, tmp)
 
 
     def read_script(self, data:str) -> list:
@@ -108,55 +103,28 @@ class DataReading():
         Returns:
             list: list of paragraphs
         """
+        
 
+        ### Parse text
         soup = BeautifulSoup(data, 'html.parser')
 
-        def filter_scence(s:str):
-            if s is None:
-                return True
+        data = ''.join(list(soup.pre.findAll(text=True)))
 
-            condition1  = re.search(r"(?:EXT|INT)", s) is not None
-            condition2  = re.search(r"[a-z]", s) is None
-            return condition1 and condition2
+        paragraphs  = list()
+        for para in data.split("\n\n"):
+            para    = clean_para(para)
+
+            if len(para) > 0:
+                paragraphs.append(para)
+
+        ### Merge 10 every consecutive sentences into a passage
+        tmp = list()
+        for ith in range(0, len(paragraphs), 5):
+            tmp.append(''.join(paragraphs[ith : ith+5]))
+        paragraphs  = tmp
 
 
-        paras   = list()
-        para    = None
-
-        def add_with_verify(l: list, s: str) -> list:
-            if s:
-                s = re.sub(r"(\n|\t)", "", s)
-                s = re.sub(r"\s{2,}", " ", s)
-                s = re.sub(r" CUT TO:", "", s)
-                s = re.sub(r"^\s", "", s)
-
-                if len(s) > 1:
-                    l.append(s.lower())
-
-        for sentence in soup.pre.find_all('b'):
-            text        = sentence.nextSibling.string if sentence.nextSibling else None
-
-            if filter_scence(text):
-                continue
-
-            sentence    = sentence.text
-
-            if filter_scence(sentence):
-                if para is not None:
-                    paras.append(para)
-
-                ## Add scence transition sentence to 'para'
-                para = list()
-                add_with_verify(para, sentence)
-
-                ## Add context sentence(s) to 'para'
-                add_with_verify(para, text)
-
-            elif para is not None:
-                add_with_verify(para, sentence)
-                add_with_verify(para, text)
-
-        return paras
+        return paragraphs
 
 
     def read_story(self, data:str) -> list:
@@ -172,10 +140,10 @@ class DataReading():
 
         paragraphs  = list()
         for para in data.split("\n\n"):
-            para = re.sub(r'\n', '', para)
+            para    = clean_para(para)
 
             if len(para) > 0:
-                paragraphs.append(para.lower())
+                paragraphs.append(para)
 
         return paragraphs
 
