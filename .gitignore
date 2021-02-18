@@ -145,3 +145,4 @@ cython_debug/
 # Redundant folders
 testing/
 .vscode
+backup

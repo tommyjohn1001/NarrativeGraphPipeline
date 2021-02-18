@@ -21,6 +21,8 @@ parser.add_argument("--n_epochs", type=int, default=10)
 parser.add_argument("--bert_model", type=str, default="bert-base-uncased",
                     help="default pretrain BERT model")
 parser.add_argument("--task", type=str, help="Select task to do")
+parser.add_argument("--n_shards", type=int, help="Number of chunks to split from large dataset",
+                    default=8)
 parser.add_argument("--device", type=str, default="default", choices=["default", "cpu", "cuda"],
                     help="Select device to run")
 
@@ -68,10 +70,10 @@ logging.getLogger().setLevel(logging.INFO)
 # Config path of backup files
 ###############################
 PATH    = {
-    'dataset_para_train'         : f"{args.init_path}/_data/QA/NarrativeQA/dataset_para_train_[N_PART].dat",
-    'dataset_para_test'          : f"{args.init_path}/_data/QA/NarrativeQA/dataset_para_test_[N_PART].dat",
-    'dataset_para_validation'    : f"{args.init_path}/_data/QA/NarrativeQA/dataset_para_valid_[N_PART].dat",
+    'dataset_para_train'            : "./backup/dataset_para/dataset_para_train_[N_PART].dat",
+    'dataset_para_test'             : "./backup/dataset_para/dataset_para_test_[N_PART].dat",
+    'dataset_para_validation'       : "./backup/dataset_para/dataset_para_valid_[N_PART].dat",
 
-    'golden_paras'  : f"{args.init_path}/_data/QA/NarrativeQA/backup_folder/golden_paras.pkl",
-    'savemodel_ParasSelection': "./saved_model/paras_selector.pt"
+    'golden_paras'                  : "./backup/golden_paras.pkl",
+    'savemodel_ParasSelection'      : "./backup/saved_model/paras_selector.pt"
 }

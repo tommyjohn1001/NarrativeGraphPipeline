@@ -1,6 +1,8 @@
 '''This file contains code reading raw data and do some preprocessing'''
 from collections import defaultdict
 import multiprocessing
+import json
+import os
 import re
 
 from bs4 import BeautifulSoup
@@ -56,25 +58,35 @@ class DataReading():
     def trigger(self):
         """ Start reading and processing data
         """
-
-
-        for split in ['train', 'test', 'valid']:
+        for split in ['train', 'test', 'validation']:
             logging.info("= Preprocess dataset: %s", split)
 
             narrativeqa = load_dataset('narrativeqa', split=split)
 
-            for nth in range(N_SHARDS):
-                list_documents  = self.process_parallel(self.f_trigger, narrativeqa.shard(N_SHARDS, nth))
+            for nth in range(args.n_shards):
+                logging.info(f"= Process shard: {nth}")
+
+                list_documents  = self.process_parallel(self.f_trigger, narrativeqa.shard(args.n_shards, nth))
+
 
                 logging.info("= Saving dataset: %s", split)
-                path    = PATH[f'dataset_para_{split}'].replace("[N_PART]", str(nth))
-                
-                save_object(path, list_documents)
 
-    def process_parallel(self, f_task: object, data: Dataset, n_cores: int = 4) -> Dataset:
+                path    = PATH[f'dataset_para_{split}'].replace("[N_PART]", str(nth))
+                self.save_dataset(path, list_documents)
+
+
+    def process_parallel(self, f_task: object, data: Dataset, n_cores: int = 4) -> list:
+        """Parallel processing helper
+
+        Args:
+            f_task (object): function to be run by processes
+            data (Dataset): dataset to be processed in parallel
+            n_cores (int, optional): no. processes. Defaults to 4.
+
+        Returns:
+            list: list containing results
         """
-        """
-    
+
         n_data  = len(data)
 
         queue   = multiprocessing.Queue()
@@ -124,9 +136,14 @@ class DataReading():
         """
 
         ### Parse text
-        soup = BeautifulSoup(data, 'html.parser')
+        
 
-        data = ''.join(list(soup.pre.findAll(text=True)))
+        try:
+            soup = BeautifulSoup(data, 'html.parser')
+            data = ''.join(list(soup.pre.findAll(text=True)))
+        except AttributeError:
+            soup = BeautifulSoup(data, 'html.parser', from_encoding='iso-8859-1')
+            data = ''.join(list(soup.pre.findAll(text=True)))
 
         paragraphs  = list()
         for para in data.split("\n\n"):
@@ -165,6 +182,27 @@ class DataReading():
 
         return paragraphs
 
+    def save_dataset(self, path: str, dataset):
+        """Save dataset. This method is dedicated for saving chunk of dataset.
+
+        Args:
+            path (str): path of dataset
+            dataset (object): dataset
+        """
+
+        if dataset is None:
+            return
+
+        if os.path.isfile(path):
+            logging.warning("=> File %s will be overwritten.", path)
+        else:
+            try:
+                os.makedirs(os.path.dirname(path))
+            except FileExistsError:
+                logging.warning("=> Folder %s exists.", str(os.path.dirname(path)))
+
+        with open(path, 'w+') as dat_file:
+            json.dump(dataset, dat_file)
 
 if __name__ == '__main__':
     logging.info("* Reading raw data and decompose into paragraphs")
