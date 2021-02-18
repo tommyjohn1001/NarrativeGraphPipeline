@@ -9,7 +9,7 @@ import torch
 
 
 ###############################
-# Đọc các argument từ CLI
+# Read arguments from CLI
 ###############################
 parser = argparse.ArgumentParser()
 
@@ -29,7 +29,7 @@ args, _ = parser.parse_known_args()
 
 
 ###############################
-# Thêm các argument
+# Add several necessary argument
 ###############################
 ## args = working_place
 if args.working_place == "local":
@@ -54,12 +54,24 @@ if args.device == "default":
 else:
     args.device = torch.device(args.device)
 
-## args khác
+## other args
 args.multi_gpus = torch.cuda.device_count() > 0
 
 
 ###############################
-# Cấu hình logging
+# Config logging
 ###############################
 logging.basicConfig(format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
 logging.getLogger().setLevel(logging.INFO)
+
+###############################
+# Config path of backup files
+###############################
+PATH    = {
+    'dataset_para_train'         : f"{args.init_path}/_data/QA/NarrativeQA/dataset_para_train_[N_PART].dat",
+    'dataset_para_test'          : f"{args.init_path}/_data/QA/NarrativeQA/dataset_para_test_[N_PART].dat",
+    'dataset_para_validation'    : f"{args.init_path}/_data/QA/NarrativeQA/dataset_para_valid_[N_PART].dat",
+
+    'golden_paras'  : f"{args.init_path}/_data/QA/NarrativeQA/backup_folder/golden_paras.pkl",
+    'savemodel_ParasSelection': "./saved_model/paras_selector.pt"
+}

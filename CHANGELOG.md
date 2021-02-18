@@ -2,6 +2,9 @@
 
 ### This file contains changes and modifications during developing.
 
+## Feb 17, 20201
+- Reorder resources of paths of backup file. From now, paths are stored in `configs.py`
+
 ## Feb 16 2021, 15:34 PM
 - Finish 'data_reading' module.
 

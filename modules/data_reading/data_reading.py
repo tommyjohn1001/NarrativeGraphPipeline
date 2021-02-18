@@ -1,14 +1,15 @@
 '''This file contains code reading raw data and do some preprocessing'''
 from collections import defaultdict
-from multiprocessing import Pool
-import glob
+import multiprocessing
 import re
 
 from bs4 import BeautifulSoup
+from datasets import dataset_dict, load_dataset
+from datasets.arrow_dataset import Dataset
 from tqdm import tqdm
 
 from modules.utils import save_object
-from configs import args, logging
+from configs import args, logging, PATH
 
 
 def clean_para(para:str) -> str:
@@ -28,11 +29,8 @@ class DataReading():
     All processed data are backed up.
     """
 
-    def __init__(self) -> None:
-        self.path_rawDataFiles  = glob.glob(f"{args.init_path}/_data/QA/NarrativeQA/tmp/*.content")
-        self.path_rawParagraphs = f"{args.init_path}/_data/QA/NarrativeQA/backup_folder/raw_paragraphs.pkl"
 
-    def f_trigger(self, path) -> list:
+    def f_trigger(self, documents, queue):
         """This function is used to run in parallel to read and initially preprocess
         raw documents.
 
@@ -42,56 +40,77 @@ class DataReading():
         Returns:
             list: list of paragraphs
         """
+        for document in documents:
+            ##########################################
+            ### Classify and decompose documents into paragraphs
+            ##########################################
 
-        # for path in list_path:
-        ##########################################
-        ### 1: Read documents from file
-        ##########################################
-        with open(path, 'r', encoding="ISO-8859-1") as dat_file:
-            data    = dat_file.read()
+            if document['document']['kind'] == 'movie': ## script
+                document['text']    = self.read_script(document['document']['text'])
+            else:
+                document['text']    = self.read_story(document['document']['text'])
 
-        ##########################################
-        ### 2: Classify and decompose documents
-        ### into paragraphs
-        ##########################################
-        if re.search(r"\<html\>", data):
-            return {
-                'id_document'   : re.findall(r"tmp\/(.+)\.content", path)[0],
-                'paragraphs'    : self.read_script(data)
-            }
-
-        return {
-            'id_document'   : re.findall(r"tmp\/(.+)\.content", path)[0],
-            'paragraphs'    : self.read_story(data)
-        }
+            queue.put(document)
 
 
     def trigger(self):
         """ Start reading and processing data
         """
 
-        logging.info("1. Start reading raw data and decompose into paragraphs")
 
-        ##########################################
-        ## Step 1: Read and preprocess raw data in parallel
-        ##########################################
-        logging.info("1.1. Read and preprocess raw data in parallel")
+        for split in ['train', 'test', 'valid']:
+            logging.info("= Preprocess dataset: %s", split)
 
-        # list_rawDocuments   = ParallelHelper(self.f_trigger, self.path_rawDataFiles).launch()
-        with Pool(args.n_cpus) as p:
-            list_rawDocuments   = list(tqdm(p.imap(self.f_trigger, self.path_rawDataFiles),
-                                            total=len(self.path_rawDataFiles)))
+            narrativeqa = load_dataset('narrativeqa', split=split)
 
-        ##########################################
-        ## Step 2: Store paragraphs
-        ##########################################
-        tmp = defaultdict()
-        for e in list_rawDocuments:
-            tmp[e['id_document']] = e['paragraphs']
+            for nth in range(N_SHARDS):
+                list_documents  = self.process_parallel(self.f_trigger, narrativeqa.shard(N_SHARDS, nth))
 
-        logging.info("1.2. Store paragraphs")
+                logging.info("= Saving dataset: %s", split)
+                path    = PATH[f'dataset_para_{split}'].replace("[N_PART]", str(nth))
+                
+                save_object(path, list_documents)
 
-        save_object(self.path_rawParagraphs, tmp)
+    def process_parallel(self, f_task: object, data: Dataset, n_cores: int = 4) -> Dataset:
+        """
+        """
+    
+        n_data  = len(data)
+
+        queue   = multiprocessing.Queue()
+        pbar    = tqdm(total=n_data)
+
+        jobs    = list()
+        for ith in range(n_cores):
+            low_bound = ith * n_data // n_cores
+            hi_bound = (ith + 1) * n_data // n_cores \
+                if ith < (n_cores - 1) else n_data
+
+            p = multiprocessing.Process(target=f_task,
+                                        args=(data.select(range(low_bound, hi_bound)), queue))
+            jobs.append(p)
+
+
+        dataset = list()
+
+        for job in jobs:
+            job.start()
+
+        cnt = 0
+        while cnt < n_data:
+            while not queue.empty():
+                dataset.append(queue.get())
+                cnt += 1
+
+                pbar.update()
+
+        pbar.close()
+
+        for job in jobs:
+            job.join()
+
+
+        return dataset
 
 
     def read_script(self, data:str) -> list:
@@ -103,7 +122,6 @@ class DataReading():
         Returns:
             list: list of paragraphs
         """
-        
 
         ### Parse text
         soup = BeautifulSoup(data, 'html.parser')
@@ -149,6 +167,8 @@ class DataReading():
 
 
 if __name__ == '__main__':
+    logging.info("* Reading raw data and decompose into paragraphs")
+
     data_reader = DataReading()
 
     data_reader.trigger()
