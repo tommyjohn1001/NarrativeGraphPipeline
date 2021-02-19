@@ -1,16 +1,14 @@
 '''This file contains code reading raw data and do some preprocessing'''
-from collections import defaultdict
 import multiprocessing
 import json
 import os
 import re
 
-from bs4 import BeautifulSoup
-from datasets import dataset_dict, load_dataset
 from datasets.arrow_dataset import Dataset
+from datasets import load_dataset
+from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-from modules.utils import save_object
 from configs import args, logging, PATH
 
 

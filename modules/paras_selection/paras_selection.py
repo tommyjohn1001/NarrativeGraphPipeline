@@ -5,7 +5,7 @@ from configs import args, logging, PATH
 
 
 if __name__ == '__main__':
-    logging.info("Paras Selection training.")
+    logging.info("* Paras Selection training.")
 
     ########################
     ## Create data for training
@@ -17,8 +17,6 @@ if __name__ == '__main__':
 
     if not check_file_existence(PATH['golden_paras']):
         list_golden_paras   = GoldenParas().generate_goldenParas()
-
-        save_object(PATH['golden_paras'], list_golden_paras)
     else:
         logging.info("=> Golden paras file is found.")
         list_golden_paras   = load_object(PATH['golden_paras'])

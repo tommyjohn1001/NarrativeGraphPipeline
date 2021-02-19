@@ -1,13 +1,13 @@
-
-from collections import defaultdict
+import glob
+import json
 import re
 
 from transformers import BertTokenizer
 import pandas as pd
 import spacy
 
-from modules.utils import load_object, ParallelHelper
-from configs import args
+from modules.utils import ParallelHelper, save_object
+from configs import args, logging, PATH
 
 BERT_TOKENIZER  = f"{args.init_path}/_pretrained/BERT/{args.bert_model}-vocab.txt"
 
@@ -16,18 +16,13 @@ nlp = spacy.load("en_core_web_sm")
 
 class GoldenParas():
     def __init__(self) -> None:
-        
-        ## Read file containing raw paragraphs and file containing
-        ## question and answer
-        path_rawParas       = f"{args.init_path}/_data/QA/NarrativeQA/backup_folder/raw_paragraphs.pkl"
-        self.dict_rawParas  = load_object(path_rawParas)
 
-        path_summaries      = f"{args.init_path}/_data/QA/NarrativeQA/summaries.xlsx"
-        self.summaries      = pd.read_excel(path_summaries, "qaps", engine="openpyxl")
-        self.summaries      = self.summaries.values.tolist()
+        ## Read file containing raw paragraphs
+        self.paths_rawParas = glob.glob("/backup/dataset_para/dataset_para_*")
 
         ## Load BERT tokenizer
         self.BERT_tokenizer = BertTokenizer.from_pretrained(args.bert_model)
+
 
     def extract_entities(self, question: str, answer1: str, answer2: str) -> set:
         """Extract entities from question and answers.
@@ -124,11 +119,12 @@ class GoldenParas():
             ### Return a dict
             ##################
             queue.put({
-                'id_document'   : id_doc,
-                "question"      : self.BERT_tokenizer.convert_tokens_to_ids(question.split(' ')),
-                "question_plain": question,     ## This field's existence is for keep tracking in later step
-                "golden_paras"  : golden_paragraphs
+                'id_document'    : id_doc,
+                "question"       : self.BERT_tokenizer.convert_tokens_to_ids(question.split(' ')),
+                "question_plain" : question,     ## This field's existence is for keep tracking in later step
+                "golden_paras"   : golden_paragraphs
             })
+
 
     def generate_goldenParas(self) -> list:
         """Read paragraphs, use keyword method to determine
@@ -138,9 +134,19 @@ class GoldenParas():
         Returns:
             list: list containing questions and corresponding golden paragraphs
         """
-        ## For each question - answer - paragraphs triple,
-        ## use keyword technique to determine golden passage
+        ## For each document, use keyword technique
+        ## to determine golden passage
+        for nth, path in enumerate(self.paths_rawParas):
+            logging.info(f"= Process file: {path}")
 
-        list_golden_paras   = ParallelHelper(self.f_findGolden, self.summaries, 4).launch()
-        
+            ### Load dataset from path
+            with open(path, 'r') as dat_file:
+                dataset = json.load(dat_file)
+
+            ### Load dataset from path
+            list_golden_paras   = ParallelHelper(self.f_findGolden, dataset,
+                                                 args.num_proc).launch()
+
+            save_object(PATH['golden_paras'].replace("[N_PART]", str(nth)), list_golden_paras)
+
         return list_golden_paras

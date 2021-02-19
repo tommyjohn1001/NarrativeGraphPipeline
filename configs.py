@@ -16,7 +16,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--working_place", choices=['local', 'remote', 'local2'],
                     help="working environment", default='local')
 parser.add_argument("--batch_size", type=int, default=1)
-parser.add_argument("--n_cpus", type=int, default=4)
+parser.add_argument("--num_proc", type=int, default=4, help="number of processes")
 parser.add_argument("--n_epochs", type=int, default=10)
 parser.add_argument("--bert_model", type=str, default="bert-base-uncased",
                     help="default pretrain BERT model")
@@ -74,6 +74,6 @@ PATH    = {
     'dataset_para_test'             : "./backup/dataset_para/dataset_para_test_[N_PART].dat",
     'dataset_para_validation'       : "./backup/dataset_para/dataset_para_valid_[N_PART].dat",
 
-    'golden_paras'                  : "./backup/golden_paras.pkl",
+    'golden_paras'                  : "./backup/golden_paras_[N_PART].pkl",
     'savemodel_ParasSelection'      : "./backup/saved_model/paras_selector.pt"
 }
