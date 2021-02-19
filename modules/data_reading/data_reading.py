@@ -47,10 +47,14 @@ class DataReading():
             ### Classify and decompose documents into paragraphs
             ##########################################
 
+            ## Remove redundant character '\x00
+            text    = document['document']['text'].replace('\x00', '')
+
+
             if document['document']['kind'] == 'movie': ## script
-                document['text']    = self.read_script(document['document']['text'])
+                document['document']['text']    = self.read_script(text)
             else:
-                document['text']    = self.read_story(document['document']['text'])
+                document['document']['text']    = self.read_story(text)
 
             queue.put(document)
 
@@ -136,14 +140,8 @@ class DataReading():
         """
 
         ### Parse text
-        
-
-        try:
-            soup = BeautifulSoup(data, 'html.parser')
-            data = ''.join(list(soup.pre.findAll(text=True)))
-        except AttributeError:
-            soup = BeautifulSoup(data, 'html.parser', from_encoding='iso-8859-1')
-            data = ''.join(list(soup.pre.findAll(text=True)))
+        soup = BeautifulSoup(data, 'html.parser')
+        data = ''.join(list(soup.pre.findAll(text=True)))
 
         paragraphs  = list()
         for para in data.split("\n\n"):
@@ -181,6 +179,7 @@ class DataReading():
                 paragraphs.append(para)
 
         return paragraphs
+
 
     def save_dataset(self, path: str, dataset):
         """Save dataset. This method is dedicated for saving chunk of dataset.
