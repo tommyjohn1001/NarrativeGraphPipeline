@@ -1,6 +1,7 @@
 import glob
 import json
 import re
+import os
 
 from transformers import BertTokenizer
 import pandas as pd
@@ -18,7 +19,8 @@ class GoldenParas():
     def __init__(self) -> None:
 
         ## Read file containing raw paragraphs
-        self.paths_rawParas = glob.glob("/backup/dataset_para/dataset_para_*")
+        self.paths_rawParas = glob.glob("./backup/dataset_para/dataset_para_*")
+        self.paths_rawParas.sort()
 
         ## Load BERT tokenizer
         self.BERT_tokenizer = BertTokenizer.from_pretrained(args.bert_model)
@@ -86,7 +88,10 @@ class GoldenParas():
             dict: dict containing question and golden paras.
         """
         for row in data:
-            id_doc, question, answer1, answer2  = row[0], row[2], row[3], row[4]
+            id_doc      = row['document']['id']
+            question    = row['question']['text']
+            answer1     = row['answers'][0]['text']
+            answer2     = row['answers'][1]['text']
 
             ##################
             ### Get entities from question
@@ -94,11 +99,18 @@ class GoldenParas():
             ##################
             entities            = self.extract_entities(question, answer1, answer2)
 
+
             ##################
             ### Start finding golden passages
             ##################
-            golden_paragraphs   = list()
-            for paragraph in self.dict_rawParas[id_doc]:
+
+            ### This list contains tokenized and converted-to-ids paragraphs
+            tokenized_paragraphs    = list()
+            ### List contains goldeness of paragraphs
+            goldeness               = list()
+
+            for paragraph in row['document']['text']:
+                #### Determine goldeness of paragraph
                 n_found_entities    = 0
 
                 for ent in entities:
@@ -110,8 +122,13 @@ class GoldenParas():
                         pass
 
                 if n_found_entities > 1:
-                    para_tokenized  = self.BERT_tokenizer.tokenize(paragraph)
-                    golden_paragraphs.append(self.BERT_tokenizer.convert_tokens_to_ids(para_tokenized))
+                    goldeness.append(1)
+                else:
+                    goldeness.append(0)
+
+                #### Tokenize and convert to id foreach paragraph
+                para_tokenized  = self.BERT_tokenizer.tokenize(paragraph)
+                tokenized_paragraphs.append(self.BERT_tokenizer.convert_tokens_to_ids(para_tokenized))
 
 
 
@@ -121,23 +138,27 @@ class GoldenParas():
             queue.put({
                 'id_document'    : id_doc,
                 "question"       : self.BERT_tokenizer.convert_tokens_to_ids(question.split(' ')),
-                "question_plain" : question,     ## This field's existence is for keep tracking in later step
-                "golden_paras"   : golden_paragraphs
+                "question_plain" : question,                ## This field's existence is for keep tracking in later step
+                "goldeness"      : goldeness,
+                "paragraphs"     : tokenized_paragraphs
             })
 
 
-    def generate_goldenParas(self) -> list:
+    def generate_goldenParas(self, i: int) -> list:
         """Read paragraphs, use keyword method to determine
         golden passages for each question. Additionally, BertTokenizer
         is applied.
+
+        Args:
+            i (int): the order of file to start processing
 
         Returns:
             list: list containing questions and corresponding golden paragraphs
         """
         ## For each document, use keyword technique
         ## to determine golden passage
-        for nth, path in enumerate(self.paths_rawParas):
-            logging.info(f"= Process file: {path}")
+        for nth, path in enumerate(self.paths_rawParas[i:]):
+            logging.info(f"= Process file {nth+i}: {os.path.split(path)[1]}")
 
             ### Load dataset from path
             with open(path, 'r') as dat_file:
@@ -148,5 +169,3 @@ class GoldenParas():
                                                  args.num_proc).launch()
 
             save_object(PATH['golden_paras'].replace("[N_PART]", str(nth)), list_golden_paras)
-
-        return list_golden_paras
