@@ -8,7 +8,9 @@ from datasets.arrow_dataset import Dataset
 from datasets import load_dataset
 from bs4 import BeautifulSoup
 from tqdm import tqdm
+import pandas as pd
 
+from modules.utils import save_object
 from configs import args, logging, PATH
 
 
@@ -28,7 +30,6 @@ class DataReading():
 
     All processed data are backed up.
     """
-
 
     def f_trigger(self, documents, queue):
         """This function is used to run in parallel to read and initially preprocess
@@ -60,7 +61,7 @@ class DataReading():
     def trigger(self):
         """ Start reading and processing data
         """
-        for split in ['train', 'test', 'validation']:
+        for split in ['test', 'validation']:
             logging.info("= Preprocess dataset: %s", split)
 
             narrativeqa = load_dataset('narrativeqa', split=split)
@@ -73,8 +74,9 @@ class DataReading():
 
                 logging.info("= Saving dataset: %s", split)
 
-                path    = PATH[f'dataset_para_{split}'].replace("[N_PART]", str(nth))
-                self.save_dataset(path, list_documents)
+                path    = PATH[f'dataset_para_{split}'].replace("[N_SHARD]", str(nth))
+                # self.save_dataset(path, list_documents)
+                save_object(path, pd.DataFrame(list_documents), True)
 
 
     def process_parallel(self, f_task: object, data: Dataset, n_cores: int = 4) -> list:
@@ -118,11 +120,11 @@ class DataReading():
 
                 pbar.update()
 
-        pbar.close()
-
         for job in jobs:
             job.join()
 
+        pbar.close()
+        queue.close()
 
         return dataset
 
@@ -179,17 +181,13 @@ class DataReading():
         return paragraphs
 
 
-    def save_dataset(self, path: str, dataset):
+    def save_dataset(self, path: str, dataset: list):
         """Save dataset. This method is dedicated for saving chunk of dataset.
 
         Args:
             path (str): path of dataset
             dataset (object): dataset
         """
-
-        if dataset is None:
-            return
-
         if os.path.isfile(path):
             logging.warning("=> File %s will be overwritten.", path)
         else:
@@ -198,8 +196,12 @@ class DataReading():
             except FileExistsError:
                 logging.warning("=> Folder %s exists.", str(os.path.dirname(path)))
 
-        with open(path, 'w+') as dat_file:
-            json.dump(dataset, dat_file)
+        ## NOTE: This is commented for testing
+        # with open(path, 'w+') as dat_file:
+        #     json.dump(dataset, dat_file)
+        dataframe   = pd.DataFrame(dataset)
+        dataframe.to_pickle(path)
+
 
 if __name__ == '__main__':
     logging.info("* Reading raw data and decompose into paragraphs")

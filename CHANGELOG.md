@@ -2,6 +2,10 @@
 
 ### This file contains changes and modifications during developing.
 
+## Feb 21, 20221
+- Use 'DataFrame' in *pandas* to pickle data and for easily deal with 'Dataset' of *huggingface*
+- Reformat the data to be backed up
+
 ## Feb 17, 20201
 - Reorder resources of paths of backup file. From now, paths are stored in `configs.py`
 

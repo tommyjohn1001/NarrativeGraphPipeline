@@ -70,10 +70,11 @@ logging.getLogger().setLevel(logging.INFO)
 # Config path of backup files
 ###############################
 PATH    = {
-    'dataset_para_train'            : "./backup/dataset_para/dataset_para_train_[N_PART].dat",
-    'dataset_para_test'             : "./backup/dataset_para/dataset_para_test_[N_PART].dat",
-    'dataset_para_validation'       : "./backup/dataset_para/dataset_para_valid_[N_PART].dat",
+    'dataset_para_train'            : "./backup/dataset_para/dataset_para_train_[N_SHARD].pkl",
+    'dataset_para_test'             : "./backup/dataset_para/dataset_para_test_[N_SHARD].pkl",
+    'dataset_para_validation'       : "./backup/dataset_para/dataset_para_valid_[N_SHARD].pkl",
 
-    'golden_paras'                  : "./backup/golden_paras_[N_PART].pkl",
+    # 'processed_data'                : "./backup/processed_data/[SPLIT]/[N_SHARD]/",
+    'processed_data'                : "./backup/processed_data/[SPLIT]/data_[N_SHARD].pkl",
     'savemodel_ParasSelection'      : "./backup/saved_model/paras_selector.pt"
 }

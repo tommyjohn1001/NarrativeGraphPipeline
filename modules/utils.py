@@ -27,7 +27,7 @@ def load_object(path) -> object:
         return pickle.load(dat_file)
 
 
-def save_object(path, obj_file) -> object:
+def save_object(path: str, obj_file: object, is_dataframe:bool = False) -> object:
     """
     Save object to pickle gzip file.
 
@@ -49,8 +49,11 @@ def save_object(path, obj_file) -> object:
         except FileExistsError:
             logging.warning("=> Folder %s exists.", str(os.path.dirname(path)))
 
-    with gzip.open(path, 'w+') as dat_file:
-        pickle.dump(obj_file, dat_file)
+    if is_dataframe:
+        obj_file.to_pickle(path)
+    else:
+        with gzip.open(path, 'w+') as dat_file:
+            pickle.dump(obj_file, dat_file)
 
 
 ########################################################
@@ -69,7 +72,7 @@ def check_file_existence(path: str) -> bool:
     return os.path.isfile(path)
 
 class ParallelHelper:
-    def __init__(self, f_task, data: list, n_cores: int = 4, *args):
+    def __init__(self, f_task: object, data: list, n_cores: int = 4, *args):
         self.n_data = len(data)
 
         self.queue  = multiprocessing.Queue()
