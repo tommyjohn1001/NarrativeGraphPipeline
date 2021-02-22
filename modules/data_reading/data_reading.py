@@ -61,21 +61,20 @@ class DataReading():
     def trigger(self):
         """ Start reading and processing data
         """
-        for split in ['test', 'validation']:
+        for split in ['train', 'test', 'validation']:
             logging.info("= Preprocess dataset: %s", split)
 
-            narrativeqa = load_dataset('narrativeqa', split=split)
+            dataset = load_dataset('narrativeqa', split=split)
 
             for nth in range(args.n_shards):
                 logging.info(f"= Process shard: {nth}")
 
-                list_documents  = self.process_parallel(self.f_trigger, narrativeqa.shard(args.n_shards, nth))
+                list_documents  = self.process_parallel(self.f_trigger, dataset.shard(args.n_shards, nth))
 
 
                 logging.info("= Saving dataset: %s", split)
 
                 path    = PATH[f'dataset_para_{split}'].replace("[N_SHARD]", str(nth))
-                # self.save_dataset(path, list_documents)
                 save_object(path, pd.DataFrame(list_documents), True)
 
 
@@ -179,28 +178,6 @@ class DataReading():
                 paragraphs.append(para)
 
         return paragraphs
-
-
-    def save_dataset(self, path: str, dataset: list):
-        """Save dataset. This method is dedicated for saving chunk of dataset.
-
-        Args:
-            path (str): path of dataset
-            dataset (object): dataset
-        """
-        if os.path.isfile(path):
-            logging.warning("=> File %s will be overwritten.", path)
-        else:
-            try:
-                os.makedirs(os.path.dirname(path))
-            except FileExistsError:
-                logging.warning("=> Folder %s exists.", str(os.path.dirname(path)))
-
-        ## NOTE: This is commented for testing
-        # with open(path, 'w+') as dat_file:
-        #     json.dump(dataset, dat_file)
-        dataframe   = pd.DataFrame(dataset)
-        dataframe.to_pickle(path)
 
 
 if __name__ == '__main__':

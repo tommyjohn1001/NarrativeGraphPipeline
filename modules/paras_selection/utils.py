@@ -3,9 +3,8 @@ import json
 import re
 import os
 
-from datasets.arrow_dataset import Dataset
-from datasets.load import load_dataset
 from transformers import BertTokenizer
+from datasets import load_dataset
 import pandas as pd
 import spacy
 
@@ -15,6 +14,8 @@ from configs import args, logging, PATH
 BERT_TOKENIZER  = f"{args.init_path}/_pretrained/BERT/{args.bert_model}-vocab.txt"
 
 nlp = spacy.load("en_core_web_sm")
+
+# pandarallel.initialize(nb_workers=args.num_proc, progress_bar=True, verbose=0)
 
 
 class GoldenParas():
@@ -76,7 +77,8 @@ class GoldenParas():
         return entities
 
 
-    def f_findGolden(self, data: list, queue):
+
+    def f_findGolden(self, data: pd.DataFrame, queue):
         """Function later used in Pool of multiprocessing. This function export entities
         and find golden passage for each paragraphs. Bert Tokenizer is used also.
 
@@ -87,7 +89,6 @@ class GoldenParas():
             dict: dict containing question and golden paras.
         """
         for document in data:
-            id_doc      = document['document']['id']
             paragraphs  = document['document']['text']
             question    = document['question']['text']
             answer1     = document['answers'][0]['text']
@@ -130,69 +131,21 @@ class GoldenParas():
                 para_tokenized  = self.BERT_tokenizer.tokenize(paragraph)
                 tokenized_paragraphs.append(self.BERT_tokenizer.convert_tokens_to_ids(para_tokenized))
 
-            document['document']['text']         = para_tokenized
-            document['document']['goldeness']    = goldeness
-
-            
 
             ##################
-            ### Return a dict
+            ### Update fields in 'document'
             ##################
-            # queue.put({
-            #     'id_document'    : id_doc,
-            #     "question"       : self.BERT_tokenizer.convert_tokens_to_ids(question.split(' ')),
-            #     "question_plain" : question,                ## This field's existence is for keep tracking in later step
-            #     "goldeness"      : goldeness,
-            #     "paragraphs"     : tokenized_paragraphs
-            # })
+            document['doc_id']          = document['document']['id']
+            document['doc_tokens']      = tokenized_paragraphs
+            document['question_text']   = document['question']['text']
+            document['question_tokens'] = self.BERT_tokenizer.convert_tokens_to_ids(document['question']['tokens'])
+            document['answer1_text']    = document['answers'][0]['text']
+            document['answer1_tokens']  = self.BERT_tokenizer.convert_tokens_to_ids(document['answers'][0]['tokens'])
+            document['answer2_text']    = document['answers'][1]['text']
+            document['answer2_tokens']  = self.BERT_tokenizer.convert_tokens_to_ids(document['answers'][1]['tokens'])
+
+
             queue.put(document)
-
-
-    def generate_goldenParas(self) -> list:
-        """Read paragraphs, use keyword method to determine
-        golden passages for each question. Additionally, BertTokenizer
-        is applied.
-
-        Args:
-            i (int): the order of file to start processing
-
-        Returns:
-            list: list containing questions and corresponding golden paragraphs
-        """
-        ## For each document, use keyword technique
-        ## to determine golden passage
-        for path in self.paths_rawParas:
-            split, n_shard  = re.findall(r"\_(train|test|valid)\_(\d+)\.pkl", path)[0] 
-            path_storeDat   = PATH['processed_data'].replace("[N_SHARD]", n_shard).replace("[SPLIT]", split)
-
-            ### Check whether this file is processed (folder specified by 'path' existed)
-            if os.path.isdir(path_storeDat):
-                continue
-
-
-            logging.info(f"= Process file: {os.path.split(path)[1]}")
-
-            ## NOTE: This line is commented for testing
-            # ### Load shard from path
-            # with open(path, 'r') as dat_file:
-            #     dataset = json.load(dat_file)
-
-            # ### Process shard of dataset
-            # list_golden_paras   = ParallelHelper(self.f_findGolden, dataset,
-            #                                      args.num_proc).launch()
-
-            dataset = load_dataset("pandas", data_files=path)
-
-            dataset = dataset.map(self.f_findGolden2, num_proc=args.num_proc,
-                        # remove_columns=['kind', 'url', 'file_size', 'word_count', 'start',
-                        #                 'end', 'summary'])
-                        remove_columns=['document', 'question', 'answers'])
-
-            
-            # dataset.save_to_disk(path_storeDat)
-            save_object(path_storeDat, pd.DataFrame(dataset), is_dataframe=True)
-
-
 
 
     def f_findGolden2(self, document: dict):
@@ -205,6 +158,8 @@ class GoldenParas():
         Returns:
             dict: dict containing question and golden paras.
         """
+
+        # print(document)
 
         paragraphs  = document['document']['text']
         question    = document['question']['text']
@@ -253,18 +208,88 @@ class GoldenParas():
         ### Update fields in 'document'
         ##################
         document['doc_id']          = document['document']['id']
-        document['doc_text']        = para_tokenized
+        document['doc_tokens']      = tokenized_paragraphs
         document['question_text']   = document['question']['text']
         document['question_tokens'] = self.BERT_tokenizer.convert_tokens_to_ids(document['question']['tokens'])
         document['answer1_text']    = document['answers'][0]['text']
         document['answer1_tokens']  = self.BERT_tokenizer.convert_tokens_to_ids(document['answers'][0]['tokens'])
         document['answer2_text']    = document['answers'][1]['text']
         document['answer2_tokens']  = self.BERT_tokenizer.convert_tokens_to_ids(document['answers'][1]['tokens'])
-        # document['document']['text']        = para_tokenized
-        # document['document']['goldeness']   = goldeness
-        # document['question']['tokens']      = self.BERT_tokenizer.convert_tokens_to_ids(document['question']['tokens'])
-        # document['answers'][0]['tokens']    = self.BERT_tokenizer.convert_tokens_to_ids(document['answers'][0]['tokens'])
-        # document['answers'][1]['tokens']    = self.BERT_tokenizer.convert_tokens_to_ids(document['answers'][1]['tokens'])
 
+        del document['document']
+        del document['question']
+        del document['answers']
 
         return document
+
+
+    def generate_goldenParas(self) -> list:
+        """Read paragraphs, use keyword method to determine
+        golden passages for each question. Additionally, BertTokenizer
+        is applied.
+
+        Args:
+            i (int): the order of file to start processing
+
+        Returns:
+            list: list containing questions and corresponding golden paragraphs
+        """
+        ## For each document, use keyword technique
+        ## to determine golden passage
+        for path in self.paths_rawParas:
+            split, n_shard  = re.findall(r"\_(train|test|valid)\_(\d+)\.pkl", path)[0] 
+            path_storeDat   = PATH['processed_data'].replace("[N_SHARD]", n_shard).replace("[SPLIT]", split)
+
+            ### Check whether this file is processed (folder specified by 'path' existed)
+            if os.path.isfile(path_storeDat):
+                continue
+
+            logging.info(f"= Process file: {os.path.split(path)[1]}")
+
+            ## NOTE: Method 1
+            # # ### Load shard from path
+            # dataset = load_dataset('pandas', data_files=path)['train']
+
+            # # ### Process shard of dataset
+            # dataset = dataset.map(self.f_findGolden2, num_proc=args.num_proc,
+            #                       remove_columns=['document', 'question', 'answers'])
+
+
+            # save_object(path_storeDat, pd.DataFrame(dataset), is_dataframe=True)
+
+
+            ## NOTE: Method 2
+            # # ### Load shard from path
+            # dataset = pd.read_pickle(path)
+
+            # # ### Process shard of dataset
+
+            # added_columns   = ['doc_id', 'doc_tokens', 'question_text',
+            #                    'question_tokens', 'question_tokens', 'answer1_text',
+            #                    'answer1_tokens', 'answer2_text', 'answer2_tokens']
+            # for column in added_columns:
+            #     dataset[column] = [None]*len(dataset)
+
+            # ParallelHelper(self.f_findGolden, dataset,
+            #                lambda data, lo_bound, hi_bound: data.iloc[lo_bound:hi_bound],
+            #                args.num_proc).launch()
+
+            # dataset.drop(axis=1, columns=['document', 'question', 'answers'])
+
+
+            # save_object(path_storeDat, dataset, is_dataframe=True)
+
+
+            ## NOTE: Method 3
+            # ### Load shard from path
+            dataset = load_dataset('pandas', data_files=path)['train']
+
+            # ### Process shard of dataset
+            dataset = ParallelHelper(self.f_findGolden, dataset,
+                                     lambda data, lo_bound, hi_bound: data.select(range(lo_bound, hi_bound)),
+                                     args.num_proc).launch()
+
+            dataset = pd.DataFrame(dataset).drop(axis=1, columns=['document', 'question', 'answers'])
+            
+            logging.info(f"= Save file: {path_storeDat}")
+            save_object(path_storeDat, dataset, is_dataframe=True)

@@ -72,7 +72,8 @@ def check_file_existence(path: str) -> bool:
     return os.path.isfile(path)
 
 class ParallelHelper:
-    def __init__(self, f_task: object, data: list, n_cores: int = 4, *args):
+    def __init__(self, f_task: object, data: list,
+                 data_allocation: object, n_cores: int = 4):
         self.n_data = len(data)
 
         self.queue  = multiprocessing.Queue()
@@ -80,13 +81,13 @@ class ParallelHelper:
 
         self.jobs = list()
         for ith in range(n_cores):
-            low_bound = ith * self.n_data // n_cores
+            lo_bound = ith * self.n_data // n_cores
             hi_bound = (ith + 1) * self.n_data // n_cores \
                 if ith < (n_cores - 1) else self.n_data
 
             p = multiprocessing.Process(target=f_task,
-                                        args=(data[low_bound: hi_bound],
-                                              self.queue, *args))
+                                        args=(data_allocation(data, lo_bound, hi_bound),# data[low_bound: hi_bound],
+                                              self.queue))
             self.jobs.append(p)
 
     def launch(self) -> list:

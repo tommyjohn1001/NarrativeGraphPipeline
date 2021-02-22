@@ -10,7 +10,7 @@ launch()
     # python -m modules.data_reading.data_reading --num_proc 5
 
     # echo "0.2. Find golden passages for each question and trigger training of ParasSelection"
-    python -m modules.paras_selection.paras_selection
+    python -m modules.paras_selection.paras_selection --num_proc 5
 }
 
 
