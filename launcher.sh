@@ -38,6 +38,12 @@ updateSourceFromGit()
     sudo git reset --hard origin/$branch_name
 }
 
+debug()
+{
+    python -m $1 --num_proc 5
+    jupyter notebook
+}
+
 print_help()
 {
     echo "** Usage of Laucher"
@@ -58,6 +64,9 @@ case $1 in
         else
             cloneProject $2
         fi        
+        ;;
+    -d | --debug )
+        debug $2
         ;;
     -u | --update-git )
         if [ -z $2 ] 
