@@ -14,7 +14,7 @@ import torch
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--working_place", choices=['local', 'remote', 'local2'],
-                    help="working environment", default='local')
+                    help="working environment", default='remote')
 parser.add_argument("--batch_size", type=int, default=1)
 parser.add_argument("--num_proc", type=int, default=4, help="number of processes")
 parser.add_argument("--n_epochs", type=int, default=10)
@@ -45,11 +45,6 @@ else:
     sys.exit(1)
 
 
-## args = bert_model
-path = f"{args.init_path}/_pretrained/BERT/{args.bert_model}"
-if os.path.exists(path):
-    args.bert_model = path
-
 ## args = device
 if args.device == "default":
     args.device     = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -70,11 +65,17 @@ logging.getLogger().setLevel(logging.INFO)
 # Config path of backup files
 ###############################
 PATH    = {
+    'bert_model'                    : f"{args.init_path}/_pretrained/BERT/{args.bert_model}",
+
+
+    ## Paths associated with Data Reading
     'dataset_para_train'            : "./backup/dataset_para/dataset_para_train_[N_SHARD].pkl",
     'dataset_para_test'             : "./backup/dataset_para/dataset_para_test_[N_SHARD].pkl",
     'dataset_para_validation'       : "./backup/dataset_para/dataset_para_valid_[N_SHARD].pkl",
 
-    # 'processed_data'                : "./backup/processed_data/[SPLIT]/[N_SHARD]/",
+
+    ## Paths associated with Paras Selection
     'processed_data'                : "./backup/processed_data/[SPLIT]/data_[N_SHARD].pkl",
+    'data_training'                 : "./backup/data_parasselection/[SPLIT]/data_[N_SHARD].pkl",
     'savemodel_ParasSelection'      : "./backup/saved_model/paras_selector.pt"
 }

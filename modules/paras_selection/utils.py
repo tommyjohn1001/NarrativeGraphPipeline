@@ -1,22 +1,28 @@
 import glob
-import json
 import re
 import os
 
 from transformers import BertTokenizer
 from datasets import load_dataset
 import pandas as pd
+import numpy as np
 import spacy
+from transformers.utils.dummy_pt_objects import LineByLineWithSOPTextDataset
 
 from modules.utils import ParallelHelper, save_object
 from configs import args, logging, PATH
 
-BERT_TOKENIZER  = f"{args.init_path}/_pretrained/BERT/{args.bert_model}-vocab.txt"
 
-nlp = spacy.load("en_core_web_sm")
 
-# pandarallel.initialize(nb_workers=args.num_proc, progress_bar=True, verbose=0)
+Tokenizer   = BertTokenizer.from_pretrained(args.bert_model)
+nlp         = spacy.load("en_core_web_sm")
 
+CLS = Tokenizer.cls_token_id
+SEP = Tokenizer.sep_token_id
+PAD = Tokenizer.pad_token_id
+
+MAX_QUESTION_LEN    = 34
+MAX_PARA_LEN        = 475
 
 class GoldenParas():
     def __init__(self) -> None:
@@ -75,7 +81,6 @@ class GoldenParas():
                     add_(entities, token)
 
         return entities
-
 
 
     def f_findGolden(self, data: pd.DataFrame, queue):
@@ -137,6 +142,7 @@ class GoldenParas():
             ##################
             document['doc_id']          = document['document']['id']
             document['doc_tokens']      = tokenized_paragraphs
+            document['goldeness']       = goldeness
             document['question_text']   = document['question']['text']
             document['question_tokens'] = self.BERT_tokenizer.convert_tokens_to_ids(document['question']['tokens'])
             document['answer1_text']    = document['answers'][0]['text']
@@ -146,81 +152,6 @@ class GoldenParas():
 
 
             queue.put(document)
-
-
-    def f_findGolden2(self, document: dict):
-        """Function later used in Pool of multiprocessing. This function export entities
-        and find golden passage for each paragraphs. Bert Tokenizer is used also.
-
-        Args:
-            document (list): document of data
-
-        Returns:
-            dict: dict containing question and golden paras.
-        """
-
-        # print(document)
-
-        paragraphs  = document['document']['text']
-        question    = document['question']['text']
-        answer1     = document['answers'][0]['text']
-        answer2     = document['answers'][1]['text']
-
-        ##################
-        ### Get entities from question
-        ### and answers
-        ##################
-        entities            = self.extract_entities(question, answer1, answer2)
-
-
-        ##################
-        ### Start finding golden passages
-        ##################
-
-        ### This list contains tokenized and converted-to-ids paragraphs
-        tokenized_paragraphs    = list()
-        ### List contains goldeness of paragraphs
-        goldeness               = list()
-
-        for paragraph in paragraphs:
-            #### Determine goldeness of paragraph
-            n_found_entities    = 0
-
-            for ent in entities:
-                try:
-                    if re.search(ent, paragraph):
-                    # if paragraph.find(ent):
-                        n_found_entities    += 1
-                except re.error:
-                    pass
-
-            if n_found_entities > 1:
-                goldeness.append(1)
-            else:
-                goldeness.append(0)
-
-            #### Tokenize and convert to id foreach paragraph
-            para_tokenized  = self.BERT_tokenizer.tokenize(paragraph)
-            tokenized_paragraphs.append(self.BERT_tokenizer.convert_tokens_to_ids(para_tokenized))
-
-
-        ##################
-        ### Update fields in 'document'
-        ##################
-        document['doc_id']          = document['document']['id']
-        document['doc_tokens']      = tokenized_paragraphs
-        document['question_text']   = document['question']['text']
-        document['question_tokens'] = self.BERT_tokenizer.convert_tokens_to_ids(document['question']['tokens'])
-        document['answer1_text']    = document['answers'][0]['text']
-        document['answer1_tokens']  = self.BERT_tokenizer.convert_tokens_to_ids(document['answers'][0]['tokens'])
-        document['answer2_text']    = document['answers'][1]['text']
-        document['answer2_tokens']  = self.BERT_tokenizer.convert_tokens_to_ids(document['answers'][1]['tokens'])
-
-        del document['document']
-        del document['question']
-        del document['answers']
-
-        return document
 
 
     def generate_goldenParas(self) -> list:
@@ -244,43 +175,9 @@ class GoldenParas():
             if os.path.isfile(path_storeDat):
                 continue
 
+
             logging.info(f"= Process file: {os.path.split(path)[1]}")
 
-            ## NOTE: Method 1
-            # # ### Load shard from path
-            # dataset = load_dataset('pandas', data_files=path)['train']
-
-            # # ### Process shard of dataset
-            # dataset = dataset.map(self.f_findGolden2, num_proc=args.num_proc,
-            #                       remove_columns=['document', 'question', 'answers'])
-
-
-            # save_object(path_storeDat, pd.DataFrame(dataset), is_dataframe=True)
-
-
-            ## NOTE: Method 2
-            # # ### Load shard from path
-            # dataset = pd.read_pickle(path)
-
-            # # ### Process shard of dataset
-
-            # added_columns   = ['doc_id', 'doc_tokens', 'question_text',
-            #                    'question_tokens', 'question_tokens', 'answer1_text',
-            #                    'answer1_tokens', 'answer2_text', 'answer2_tokens']
-            # for column in added_columns:
-            #     dataset[column] = [None]*len(dataset)
-
-            # ParallelHelper(self.f_findGolden, dataset,
-            #                lambda data, lo_bound, hi_bound: data.iloc[lo_bound:hi_bound],
-            #                args.num_proc).launch()
-
-            # dataset.drop(axis=1, columns=['document', 'question', 'answers'])
-
-
-            # save_object(path_storeDat, dataset, is_dataframe=True)
-
-
-            ## NOTE: Method 3
             # ### Load shard from path
             dataset = load_dataset('pandas', data_files=path)['train']
 
@@ -293,3 +190,73 @@ class GoldenParas():
             
             logging.info(f"= Save file: {path_storeDat}")
             save_object(path_storeDat, dataset, is_dataframe=True)
+
+
+def pad(tokens: list, pad_len: int) -> tuple:
+    """Pad list of tokens
+
+    Args:
+        tokens (list): list of tokens to be added PADDING character
+        pad_len (int): no. PADDING characters to be added
+
+    Returns:
+        tuple: tuple of 2 lists, one is padded list of tokens, another is list of attention mask
+    """
+    return tokens + [PAD]*(pad_len-len(tokens)), [1]*len(tokens) + [0]*(pad_len-len(tokens))
+
+
+def create_tensors(document: dict) -> list:
+    """Create tensor to train/infer from question and paragraph tokens and goldeness list of each
+    document in dataset by truncating and padding. Since paragraph length may exceed
+    max length of Bert, truncation is needed. Therefore, return is list.
+
+    Args:
+        document (dict): each document in dataset
+
+    Returns:
+        list: list of pairs
+    """
+    question    = document['question_tokens']
+    paragraphs  = document['doc_tokens']
+    trgs        = document['goldeness']
+
+    question_   = pad(question, MAX_QUESTION_LEN)
+
+    list_src, list_mask, list_trg   = list(), list(), list()
+    for paragraph, trg in zip(paragraphs, trgs):
+        for ith in range(0, len(paragraph), MAX_PARA_LEN):
+            paragraph_  = pad(paragraph[ith:ith+MAX_PARA_LEN], MAX_PARA_LEN)
+
+            pair    = [CLS] + question_[0] + [SEP] + paragraph_[0] + [SEP]
+            mask    = [1]   + question_[1] + [1]   + paragraph_[1] + [1]
+
+            list_src.append(np.asarray(pair))
+            list_mask.append(np.asarray(mask))
+            list_trg.append(np.asarray(trg))
+
+
+    document['src']         = np.vstack(list_src)
+    document['attn_mask']   = np.vstack(list_mask)
+    document['trg']         = np.vstack(list_trg)
+
+
+    return document
+
+## NOTE: Under development
+def get_data_for_training():
+    for split in ['train', 'test', 'valid']:
+        paths   = glob.glob(f"./backup/processed_data/{split}/data_*.pkl", recursive=True)
+
+        if len(paths) > 0:
+            paths.sort()
+            for shard, path in enumerate(paths[:2]):
+                logging.info(f"= Process dataset: {path}")
+
+                dataset = load_dataset('pandas', data_files=path)['train']
+
+                dataset = dataset.map(create_tensors, num_proc=args.num_proc, remove_columns=dataset.column_names)
+
+                path_trainingData   = PATH['data_training'].replace('[SPLIT]', split).replace('[N_SHARD]', str(shard))
+
+                logging.info(f"= Save dataset: {path}")
+                save_object(path_trainingData, pd.DataFrame(dataset), is_dataframe=True)
