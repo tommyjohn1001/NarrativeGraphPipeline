@@ -5,9 +5,7 @@ import os
 from transformers import BertTokenizer
 from datasets import load_dataset
 import pandas as pd
-import numpy as np
 import spacy
-from transformers.utils.dummy_pt_objects import LineByLineWithSOPTextDataset
 
 from modules.utils import ParallelHelper, save_object
 from configs import args, logging, PATH
@@ -230,25 +228,30 @@ def create_tensors(document: dict) -> list:
             pair    = [CLS] + question_[0] + [SEP] + paragraph_[0] + [SEP]
             mask    = [1]   + question_[1] + [1]   + paragraph_[1] + [1]
 
-            list_src.append(np.asarray(pair))
-            list_mask.append(np.asarray(mask))
-            list_trg.append(np.asarray(trg))
+            list_src.append(pair)
+            list_mask.append(mask)
+            list_trg.append(trg)
 
 
-    document['src']         = np.vstack(list_src)
-    document['attn_mask']   = np.vstack(list_mask)
-    document['trg']         = np.vstack(list_trg)
+    document['src']         = list_src
+    document['attn_mask']   = list_mask
+    document['trg']         = list_trg
 
 
     return document
 
 ## NOTE: Under development
 def get_data_for_training():
-    for split in ['train', 'test', 'valid']:
+    ## NOTE: Under development
+    # for split in ['train', 'test', 'valid']:
+    for split in ['test']:
         paths   = glob.glob(f"./backup/processed_data/{split}/data_*.pkl", recursive=True)
+
+        dataset = load_dataset('pandas', data_files=paths)
 
         if len(paths) > 0:
             paths.sort()
+
             for shard, path in enumerate(paths[:2]):
                 logging.info(f"= Process dataset: {path}")
 
@@ -256,7 +259,8 @@ def get_data_for_training():
 
                 dataset = dataset.map(create_tensors, num_proc=args.num_proc, remove_columns=dataset.column_names)
 
-                path_trainingData   = PATH['data_training'].replace('[SPLIT]', split).replace('[N_SHARD]', str(shard))
 
-                logging.info(f"= Save dataset: {path}")
-                save_object(path_trainingData, pd.DataFrame(dataset), is_dataframe=True)
+        path_trainingData   = PATH['data_training'].replace('[SPLIT]', split).replace('[N_SHARD]', str(shard))
+
+        logging.info(f"= Save dataset: {path}")
+        save_object(path_trainingData, pd.DataFrame(dataset), is_dataframe=True)
