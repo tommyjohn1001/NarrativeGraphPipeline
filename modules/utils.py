@@ -86,7 +86,7 @@ class ParallelHelper:
                 if ith < (n_cores - 1) else self.n_data
 
             p = multiprocessing.Process(target=f_task,
-                                        args=(data_allocation(data, lo_bound, hi_bound),# data[low_bound: hi_bound],
+                                        args=(data_allocation(data, lo_bound, hi_bound),
                                               self.queue))
             self.jobs.append(p)
 

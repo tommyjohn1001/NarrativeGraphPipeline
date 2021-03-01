@@ -1,3 +1,5 @@
+from datetime import time
+from queue import Queue
 import glob
 import re
 import os
@@ -203,50 +205,13 @@ def pad(tokens: list, pad_len: int) -> tuple:
     return tokens + [PAD]*(pad_len-len(tokens)), [1]*len(tokens) + [0]*(pad_len-len(tokens))
 
 
-# def create_tensors(document: dict) -> list:
-#     """Create tensor to train/infer from question and paragraph tokens and goldeness list of each
-#     document in dataset by truncating and padding. Since paragraph length may exceed
-#     max length of Bert, truncation is needed. Therefore, return is list.
-
-#     Args:
-#         document (dict): each document in dataset
-
-#     Returns:
-#         list: list of pairs
-#     """
-#     question    = document['question_tokens']
-#     paragraphs  = document['doc_tokens']
-#     trgs        = document['goldeness']
-
-#     question_   = pad(question, MAX_QUESTION_LEN)
-
-#     list_src, list_mask, list_trg   = list(), list(), list()
-#     for paragraph, trg in zip(paragraphs, trgs):
-#         for ith in range(0, len(paragraph), MAX_PARA_LEN):
-#             paragraph_  = pad(paragraph[ith:ith+MAX_PARA_LEN], MAX_PARA_LEN)
-
-#             pair    = [CLS] + question_[0] + [SEP] + paragraph_[0] + [SEP]
-#             mask    = [1]   + question_[1] + [1]   + paragraph_[1] + [1]
-
-#             list_src.append(np.asarray(pair))
-#             list_mask.append(np.asarray(mask))
-#             list_trg.append(np.asarray(trg))
-
-
-#     document['src']         = np.vstack(list_src)
-#     document['attn_mask']   = np.vstack(list_mask)
-#     document['trg']         = np.vstack(list_trg)
-
-
-#     return document
-
-
-def f_conv( document: dict, queue):
-    question    = document['question_tokens']
-    paragraphs  = document['doc_tokens']
-    trgs        = document['goldeness']
+def f_conv(document, queue=None):
+    question    = document.question_tokens
+    paragraphs  = document.doc_tokens
+    trgs        = document.goldeness
 
     question_   = pad(question, MAX_QUESTION_LEN)
+    
 
     for paragraph, trg in zip(paragraphs, trgs):
         for ith in range(0, len(paragraph), MAX_PARA_LEN):
@@ -255,7 +220,7 @@ def f_conv( document: dict, queue):
             pair    = [CLS] + question_[0] + [SEP] + paragraph_[0] + [SEP]
             mask    = [1]   + question_[1] + [1]   + paragraph_[1] + [1]
 
-            queue.put({
+            queue.append({
                 'src'   : pair,
                 'mask'  : mask,
                 'trg'   : trg
@@ -266,22 +231,28 @@ def conv():
     for split in ['train', 'test', 'valid']:
         paths   = glob.glob(f"./backup/processed_data/{split}/data_*.pkl", recursive=True)
 
-        dataset = load_dataset('pandas', data_files=paths)
 
         if len(paths) > 0:
             paths.sort()
             for shard, path in enumerate(paths):
                 logging.info(f"= Process file {path}")
                 ### Load shard from path
+
+                # dataset     = pd.read_pickle(path)
+                # ### Process shard of dataset
+                # results = ParallelHelper(f_conv, dataset,
+                #                         lambda data, lo_bound, hi_bound: data.iloc[lo_bound: hi_bound],
+                #                         args.num_proc).launch()
+
                 dataset = load_dataset('pandas', data_files=path)
 
-                ### Process shard of dataset
-                dataset = ParallelHelper(f_conv, dataset,
-                                        lambda data, lo_bound, hi_bound: data.select(range(lo_bound, hi_bound)),
-                                        args.num_proc).launch()
+                results = list()
+                dataset.map(f_conv, remove_columns=dataset.column_names,
+                            num_proc=2, fn_kwargs={'queue': results})
+
 
                 ### Save data to CSV file
-                dataset = pd.DataFrame(dataset)
+                dataset = pd.DataFrame(results)
                 path_saveFile   = PATH['data_training'].replace("[SPLIT]", split).replace("[N_SHARD]", str(shard))
 
                 logging.info(f"= Save file {path_saveFile}")
