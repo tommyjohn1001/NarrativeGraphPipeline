@@ -112,6 +112,9 @@ class ParallelHelper:
         self.pbar.close()
 
         for job in self.jobs:
+            job.terminate()
+
+        for job in self.jobs:
             job.join()
 
 
