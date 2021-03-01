@@ -5,7 +5,6 @@ import os
 from transformers import BertTokenizer
 from datasets import load_dataset
 import pandas as pd
-import numpy as np
 import spacy
 
 from modules.utils import ParallelHelper, save_object
@@ -266,6 +265,8 @@ def f_conv( document: dict, queue):
 def conv():
     for split in ['train', 'test', 'valid']:
         paths   = glob.glob(f"./backup/processed_data/{split}/data_*.pkl", recursive=True)
+
+        dataset = load_dataset('pandas', data_files=paths)
 
         if len(paths) > 0:
             paths.sort()

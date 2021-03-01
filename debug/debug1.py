@@ -17,65 +17,102 @@ from configs import args, logging, PATH
 datasets.logging.set_verbosity_warning()
 
 
-def train(dataset: Dataset, model, optimizer, loss, scheduler):
+def train(dataset_train: Dataset, model, optimizer, loss, scheduler=None):
     model.train()
 
-    accum_loss  = 0
-    for nth_batch in range(args.batch_size):
-        logging.info("Start batch by processing file")
+    nth_batch   = 0
+    ave_loss    = 0
 
-        shard   = dataset.shard(args.batch_size, nth_batch)
-        shard   = shard.map(create_tensors, num_proc=args.num_proc, remove_columns=dataset.column_names)
+    for entry in dataset_train:
+        src         = list(map(torch.LongTensor, entry['src']))
+        attn_mask   = list(map(torch.LongTensor, entry['attn_mask']))
+        trg         = list(map(torch.FloatTensor, entry['trg']))
 
-
-        logging.info("Start training")
-        for entry in shard:
-            ### Create data tensors from processed dataset
-            src         = torch.tensor(entry['src']).to(args.device)
-            attn_mask   = torch.tensor(entry['attn_mask']).to(args.device)
-            trg         = torch.tensor(entry['trg']).to(args.device)
+        for ith in range(0, len(src), args.batch_size):
+            src_        = torch.vstack(src[ith:ith+args.batch_size]).to(args.device)
+            attn_mask_  = torch.vstack(attn_mask[ith:ith+args.batch_size]).to(args.device)
+            trg_        = torch.vstack(trg[ith:ith+args.batch_size]).to(args.device)
 
             ### Push tensors to model to train
-            predict     = model(src, attn_mask)
+            predict     = model(src_, attn_mask_)
 
             ### Calculate loss and do some stuffs
-            output      = loss(predict, trg)
+            output      = loss(predict, trg_)
 
             output.backward()
-            optimizer.step()
-            scheduler.step()
+            optimizer.step()        
 
-            accum_loss  += output
+            ### Collect and log some info
+            print(f"= Batch {nth_batch:3d}: Loss: {output:9.6f}")
+            nth_batch   += 1
+            ave_loss    += output
 
-            print(f"First entry: train: loss: {accum_loss:7.3f}")
+        torch.cuda.empty_cache()
 
-            sys.exit()
 
-    return accum_loss / dataset.num_rows
+    return ave_loss / nth_batch
 
+
+def eval(dataset_test: Dataset, model, loss):
+    model.eval()
+
+    nth_batch   = 0
+    ave_loss    = 0
+
+    with torch.no_grad():
+        for entry in dataset_test:
+            src         = list(map(torch.LongTensor, entry['src']))
+            attn_mask   = list(map(torch.LongTensor, entry['attn_mask']))
+            trg         = list(map(torch.FloatTensor, entry['trg']))
+
+            for ith in range(0, len(src), args.batch_size):
+                src_        = torch.vstack(src[ith:ith+args.batch_size]).to(args.device)
+                attn_mask_  = torch.vstack(attn_mask[ith:ith+args.batch_size]).to(args.device)
+                trg_        = torch.vstack(trg[ith:ith+args.batch_size]).to(args.device)
+
+                ### Push tensors to model to train
+                predict     = model(src_, attn_mask_)
+
+                ### Calculate loss and do some stuffs
+                output      = loss(predict, trg_)
+
+                ### Collect and log some info
+                print(f"= Batch {nth_batch:3d}: Loss: {output:9.6f}")
+                nth_batch   += 1
+                ave_loss    += output
+
+            torch.cuda.empty_cache()
+
+
+    return ave_loss / nth_batch
 
 if __name__ == '__main__':
-    paths           = glob("./backup/processed_data/valid/data_0.pkl")
+    logging.info("")
+    paths           = glob("./backup/processed_data/train/data_*.pkl", recursive=True)
     dataset_train   = load_dataset('pandas', data_files=paths)['train']
+
+    paths           = glob("./backup/processed_data/test/data_*.pkl", recursive=True)
+    dataset_test    = load_dataset('pandas', data_files=paths)['train']
+
+    dataset_train   = dataset_train.map(create_tensors, 
+                                        remove_columns=dataset_train.column_names)
+    dataset_test    = dataset_train.map(create_tensors,
+                                        remove_columns=dataset_train.column_names)
 
 
     model       = ParasScoring().to(args.device)
     optimizer   = AdamW(model.parameters())
-    scheduler   = get_linear_schedule_with_warmup(optimizer, 1000, dataset_train)
+    # scheduler   = get_linear_schedule_with_warmup(optimizer, 1000, dataset_train)
     loss        = torch_nn.MSELoss()
 
 
-    best_lost_test  = 10e5
-    for n_epoch in range(args.n_epochs):
-        
-        loss_train  = train(dataset_train, model, optimizer, loss, scheduler)
+    ## Train
+    for n_epoch in range(2):
 
-        # loss_test   = eval(dataset_test, model, loss)
+        loss_train  = train(dataset_train, model, optimizer, loss)
 
-        # if loss_test < best_lost_test:
-        #     best_lost_test = loss_test
-        #     self.save_model(model)
+        loss_test   = eval(dataset_test, model, loss)
+
 
         print(f"epoch {n_epoch:2d} | train: loss: {loss_train:7.3f}")
 
-        break
