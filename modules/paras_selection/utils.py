@@ -1,5 +1,5 @@
 from datetime import time
-from queue import Queue
+import json
 import glob
 import re
 import os
@@ -23,6 +23,9 @@ PAD = Tokenizer.pad_token_id
 
 MAX_QUESTION_LEN    = 34
 MAX_PARA_LEN        = 475
+
+
+N_SUBSHARDS         = 5
 
 class GoldenParas():
     def __init__(self) -> None:
@@ -205,13 +208,13 @@ def pad(tokens: list, pad_len: int) -> tuple:
     return tokens + [PAD]*(pad_len-len(tokens)), [1]*len(tokens) + [0]*(pad_len-len(tokens))
 
 
-def f_conv(document, queue=None):
-    question    = document.question_tokens
-    paragraphs  = document.doc_tokens
-    trgs        = document.goldeness
+def f_conv(document, queue):
+    question    = json.loads(document['question_tokens'])
+    paragraphs  = json.loads(document['doc_tokens'])
+    trgs        = json.loads(document['goldeness'])
 
     question_   = pad(question, MAX_QUESTION_LEN)
-    
+
 
     for paragraph, trg in zip(paragraphs, trgs):
         for ith in range(0, len(paragraph), MAX_PARA_LEN):
@@ -226,38 +229,34 @@ def f_conv(document, queue=None):
                 'trg'   : trg
             })
 
+    return document
+
 
 def conv():
     for split in ['train', 'test', 'valid']:
-        paths   = glob.glob(f"./backup/processed_data/{split}/data_*.pkl", recursive=True)
+        paths   = glob.glob(f"./backup/processed_data/{split}/data_*.csv", recursive=True)
 
 
         if len(paths) > 0:
             paths.sort()
             for shard, path in enumerate(paths):
                 logging.info(f"= Process file {path}")
-                ### Load shard from path
 
-                # dataset     = pd.read_pickle(path)
-                # ### Process shard of dataset
-                # results = ParallelHelper(f_conv, dataset,
-                #                         lambda data, lo_bound, hi_bound: data.iloc[lo_bound: hi_bound],
-                #                         args.num_proc).launch()
+                for sha in range(N_SUBSHARDS):
+                    dataset = load_dataset('csv', data_files=path)['train'].shard(N_SUBSHARDS, sha)
 
-                dataset = load_dataset('pandas', data_files=path)
-
-                results = list()
-                dataset.map(f_conv, remove_columns=dataset.column_names,
-                            num_proc=2, fn_kwargs={'queue': results})
+                    list_entries    = list()
+                    dataset.map(f_conv, remove_columns=dataset.column_names[:-2],
+                                num_proc=args.num_proc, fn_kwargs={'queue': list_entries})
 
 
-                ### Save data to CSV file
-                dataset = pd.DataFrame(results)
-                path_saveFile   = PATH['data_training'].replace("[SPLIT]", split).replace("[N_SHARD]", str(shard))
+                    ### Save data to CSV file
+                    dataset = pd.DataFrame(list_entries)
+                    path_saveFile   = PATH['data_training'].replace("[SPLIT]", split).replace("[N_SHARD]", f"{shard}{sha}")
 
-                logging.info(f"= Save file {path_saveFile}")
-                try:
-                    os.makedirs(os.path.dirname(path_saveFile))
-                except FileExistsError:
-                    pass
-                dataset.to_csv(path_saveFile)
+                    logging.info(f"= Save file {path_saveFile}")
+                    try:
+                        os.makedirs(os.path.dirname(path_saveFile))
+                    except FileExistsError:
+                        pass
+                    dataset.to_csv(path_saveFile)
