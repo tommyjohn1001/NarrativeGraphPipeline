@@ -83,7 +83,7 @@ class ParasSelection:
         for batch in tqdm(dataloader):
             srcs    = torch.vstack(batch['src']).transpose(0, 1).to(args.device)
             masks   = torch.vstack(batch['mask']).transpose(0, 1).to(args.device)
-            trgs    = torch.vstack(batch['trg']).transpose(0, 1).to(args.device)
+            trgs    = torch.tensor(batch['trg'], dtype=torch.float32).to(args.device)
 
             predict     = model(srcs, masks)
 
@@ -107,7 +107,7 @@ class ParasSelection:
             for  batch in tqdm(dataloader):
                 srcs    = torch.vstack(batch['src']).transpose(0, 1).to(args.device)
                 masks   = torch.vstack(batch['mask']).transpose(0, 1).to(args.device)
-                trgs    = torch.vstack(batch['trg']).transpose(0, 1).to(args.device)
+                trgs    = torch.tensor(batch['trg'], dtype=torch.float32).to(args.device)
 
                 predict     = model(srcs, masks)
 
