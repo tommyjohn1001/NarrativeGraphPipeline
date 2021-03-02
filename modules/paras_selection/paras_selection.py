@@ -1,5 +1,6 @@
 
 from modules.utils import load_object, save_object, check_file_existence
+from modules.paras_selection.ParasSelection import ParasSelection
 from modules.paras_selection.utils import GoldenParas
 from configs import args, logging, PATH
 
@@ -20,10 +21,18 @@ if __name__ == '__main__':
     logging.info("=> Data files are created and saved sufficiently.")
 
 
+    paras_selection = ParasSelection()
     ########################
     ## Start training Paras Selection model
     ########################
-    ## TODO: Implement: call ParasSelection and trigger training
-    # logging.info("2. Start training ParasSelection.")
+    logging.info("2. Start training ParasSelection.")
 
-    # paras_selection = ParasSelection()
+    paras_selection.trigger_train()
+
+
+    ########################
+    ## Start training Paras Selection model
+    ########################
+    logging.info("2. Start inferring.")
+
+    paras_selection.trigger_inference()

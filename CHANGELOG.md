@@ -2,6 +2,10 @@
 
 ### This file contains changes and modifications during developing.
 
+## Mar 2, 20221
+- Use *csv* format instead of *pickle* for data backup
+- Finish implementing training and inferring module for *ParasSelection*
+
 ## Feb 21, 20221
 - Use 'DataFrame' in *pandas* to pickle data and for easily deal with 'Dataset' of *huggingface*
 - Reformat the data to be backed up

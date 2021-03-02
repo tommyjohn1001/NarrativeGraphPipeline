@@ -236,7 +236,6 @@ def conv():
     for split in ['train', 'test', 'valid']:
         paths   = glob.glob(f"./backup/processed_data/{split}/data_*.csv", recursive=True)
 
-
         if len(paths) > 0:
             paths.sort()
             for shard, path in enumerate(paths):
@@ -260,3 +259,12 @@ def conv():
                     except FileExistsError:
                         pass
                     dataset.to_csv(path_saveFile)
+
+                    dataset = None
+    
+    
+        all_filenames = [i for i in glob.glob(f'backup/data_parasselection/{split}/*.csv')]
+
+        combined_csv = pd.concat([pd.read_csv(f) for f in all_filenames ]).drop(columns=['Unnamed: 0'])
+        #export to csv
+        combined_csv.to_csv(f"backup/data_parasselection/{split}.csv", index=False, encoding='utf-8-sig')

@@ -1,18 +1,32 @@
 from glob import glob
-import os
+import json, os
 
-
-from transformers import BertModel, AdamW, get_linear_schedule_with_warmup
-from datasets import load_dataset, Dataset
-# from torch.utils.data import Dataset, DataLoader
+from transformers import BertModel, AdamW, get_linear_schedule_with_warmup,\
+    BertTokenizer
+from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
+from datasets import load_dataset
+from tqdm import tqdm
+import pandas as pd
+import spacy
 
-from modules.paras_selection.utils import create_tensors
+from modules.paras_selection.utils import pad
+from modules.utils import check_file_existence
 from configs import args, logging, PATH
 
+FILTERING_THETA = 0.1
 
+Tokenizer   = BertTokenizer.from_pretrained(args.bert_model)
+nlp         = spacy.load("en_core_web_sm")
+
+CLS = Tokenizer.cls_token_id
+SEP = Tokenizer.sep_token_id
+PAD = Tokenizer.pad_token_id
+
+MAX_QUESTION_LEN    = 34
+MAX_PARA_LEN        = 475
 
 class ParasScoring(torch_nn.Module):
     """ Score paras
@@ -42,7 +56,19 @@ class ParasScoring(torch_nn.Module):
 
         return torch.squeeze(X)
 
+class CustomDataset(Dataset):
+    def __init__(self, path) -> None:
+        super().__init__()
 
+        assert os.path.isfile(path), f"File {path} not existed."
+
+        self.data_csv   = pd.read_csv(path).drop(columns=['Unnamed: 0']).applymap(lambda x: json.loads(str(x)))
+
+    def __len__(self):
+        return len(self.data_csv)
+
+    def __getitem__(self, index):
+        return self.data_csv.iloc[index].to_dict()
 
 class ParasSelection:
     ## TODO: Test this class
@@ -50,64 +76,46 @@ class ParasSelection:
     #########################################################
     # METHODS FOR TRAINING PROCESS
     #########################################################
-    def train(self, dataset: Dataset, model, optimizer, loss, scheduler):
+    def train(self, dataloader, model, optimizer, loss, scheduler):
         model.train()
 
         accum_loss  = 0
-        n_samples  = 0
-        for ith_batch in range(args.batch_size):
-            ### Shard data and processs data to tensors
-            batched_dataset = dataset.shard(args.batch_size, ith_batch)
+        for batch in tqdm(dataloader):
+            srcs    = torch.vstack(batch['src']).transpose(0, 1).to(args.device)
+            masks   = torch.vstack(batch['mask']).transpose(0, 1).to(args.device)
+            trgs    = torch.vstack(batch['trg']).transpose(0, 1).to(args.device)
 
-            ### Create data tensors from processed dataset
-            src         = torch.tensor(batched_dataset['src']).to(args.device)
-            attn_mask   = torch.tensor(batched_dataset['attn_mask']).to(args.device)
-            trg         = torch.tensor(batched_dataset['trg']).to(args.device)
+            predict     = model(srcs, masks)
 
-            ### Push tensors to model to train
-            predict     = model(src, attn_mask)
-
-            ### Calculate loss and do some stuffs
-            output      = loss(predict, trg)
+            output      = loss(predict, trgs)
 
             output.backward()
             optimizer.step()
             scheduler.step()
 
-            n_samples  += batched_dataset.num_rows
             accum_loss  += output
 
-        return accum_loss / n_samples
+
+        return accum_loss / len(dataloader)
 
 
-    def eval(self, dataset, model, loss):
+    def eval(self, dataloader, model, loss):
         model.eval()
 
         with torch.no_grad():
-            accum_loss, n_samples   = 0, 0
-            for ith_batch in range(args.batch_size):
-                ### Shard data and processs data to tensors
-                batched_dataset = dataset.shard(args.batch_size, ith_batch)
+            accum_loss  = 0
+            for  batch in tqdm(dataloader):
+                srcs    = torch.vstack(batch['src']).transpose(0, 1).to(args.device)
+                masks   = torch.vstack(batch['mask']).transpose(0, 1).to(args.device)
+                trgs    = torch.vstack(batch['trg']).transpose(0, 1).to(args.device)
 
-                ## TODO: Test this method
-                batched_dataset = batched_dataset.map(create_tensors, num_proc=args.num_proc,
-                                                    remove_columns=[batched_dataset.column_names()])
+                predict     = model(srcs, masks)
 
-                ### Create data tensors from processed dataset
-                src         = torch.tensor(batched_dataset['src']).to(args.device)
-                attn_mask   = torch.tensor(batched_dataset['attn_mask']).to(args.device)
-                trg         = torch.tensor(batched_dataset['trg']).to(args.device)
+                output      = loss(predict, trgs)
 
-                ### Push tensors to model to train
-                predict     = model(src, attn_mask)
-
-                ### Calculate loss and do some stuffs
-                output      = loss(predict, trg)
-
-                n_samples   += batched_dataset.num_rows
                 accum_loss  += output
 
-        return accum_loss / n_samples
+        return accum_loss / len(dataloader)
 
 
     def trigger_train(self):
@@ -119,14 +127,14 @@ class ParasSelection:
         #######################
         logging.info("1. Load train, test and eval data")
 
-        paths           = glob("./backup/processed_data/train")
-        dataset_train   = load_dataset('pandas', data_files=paths)['train']
+        path            = glob("./backup/data_parasselection/train.csv")
+        dataset_train   = CustomDataset(path)
 
-        paths           = glob("./backup/processed_data/test")
-        dataset_test    = load_dataset('pandas', data_files=paths)['train']
+        path            = glob("./backup/data_parasselection/test.csv")
+        dataset_test    = CustomDataset(path)
 
-        paths           = glob("./backup/processed_data/eval")
-        dataset_eval    = load_dataset('pandas', data_files=paths)['train']
+        path            = glob("./backup/data_parasselection/valid.csv")
+        dataset_valid   = CustomDataset(path)
 
 
         #######################
@@ -136,7 +144,7 @@ class ParasSelection:
 
         model       = ParasScoring().to(args.device)
         optimizer   = AdamW(model.parameters())
-        scheduler   = get_linear_schedule_with_warmup(optimizer, 1000, dataset_train)
+        scheduler   = get_linear_schedule_with_warmup(optimizer, 1000, len(dataset_train))
         loss        = torch_nn.MSELoss()
 
 
@@ -145,17 +153,20 @@ class ParasSelection:
         #######################
         logging.info("3. Start training and testing")
 
+        dataloader_train    = DataLoader(dataset_train, batch_size=args.batch_size, shuffle=True)
+        dataloader_test     = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=True)
+        dataloader_valid    = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=True)
+
         best_lost_test  = 10e5
         for n_epoch in range(args.n_epochs):
-            loss_train  = self.train(dataset_train, model, optimizer, loss, scheduler)
-
-            loss_test   = self.eval(dataset_test, model, loss)
+            loss_train  = self.train(dataloader_train, model, optimizer, loss, scheduler)
+            loss_test   = self.eval(dataloader_test, model, loss)
 
             if loss_test < best_lost_test:
                 best_lost_test = loss_test
                 self.save_model(model)
 
-            logging.info(f"epoch {n_epoch:2d} | train: loss: {loss_train:7.3f} | eval: loss: {loss_test:7.3f}")
+            logging.info(f"epoch {n_epoch:3d} | train: loss: {loss_train:10.5f} | eval: loss: {loss_test:10.5f}")
 
 
         #######################
@@ -163,38 +174,102 @@ class ParasSelection:
         #######################
         logging.info("4. Start evaluating model")
 
-        loss_eval   = self.eval(dataset_eval, model, loss)
+        loss_eval   = self.eval(dataloader_valid, model, loss)
         logging.info(f"=> Eval: loss: {loss_eval:7.3f}")
 
 
     #########################################################
     # METHODS FOR INFERENCE PROCESS
     #########################################################
+    def f_infer(self, document: dict, model) -> dict:
+        """Function to be fed into mapping function of each dataset.
+        This is used only for inferring
+
+        Args:
+            document (dict): each entry of dataset
+            model : model used for inferring
+
+        Returns:
+            dict: entry after being updated
+        """
+        ## Initial preparation
+        question        = json.loads(document['question_tokens'])
+        paragraphs      = json.loads(document['doc_tokens'])
+
+        question_       = pad(question, MAX_QUESTION_LEN)
+
+        list_paragraphs = []    ## This list holds paragraphs whose score
+                                ## is greater than FILTERING_THETA
+
+        ## For each paragraph, convert into tensors,
+        ## pass tensors to model, calculate mean score of
+        ## output from those tensor and compare mean score with
+        for paragraph in paragraphs:
+            list_pairs  = []
+
+            ### Create pairs
+            for ith in range(0, len(paragraph), MAX_PARA_LEN):
+                paragraph_  = pad(paragraph[ith:ith+MAX_PARA_LEN], MAX_PARA_LEN)
+
+                pair    = [CLS] + question_[0] + [SEP] + paragraph_[0] + [SEP]
+                mask    = [1]   + question_[1] + [1]   + paragraph_[1] + [1]
+
+                list_pairs.append({
+                    'src'   : pair,
+                    'mask'  : mask,
+                })
+
+            ### Batchify pairs
+            src, mask = [], []
+            for pair in list_pairs:
+                src.append(pair['src'])
+                mask.append(pair['mask'])
+
+            ## Start inferring with model
+            model.eval()
+            with torch.no_grad():
+                for ith in range(0, len(src), args.batch_size):
+                    src_    = torch.vstack(src[ith:ith+args.batch_size]).to(args.device)
+                    mask_   = torch.vstack(mask[ith:ith+args.batch_size]).to(args.device)
+
+                    predict = model(src_, mask_)
+
+                    if torch.mean(predict) >= FILTERING_THETA:
+                        list_paragraphs.append(paragraph)
+
+
+        document['doc_tokens']  = list_paragraphs
+
+        return document
+
+
     def trigger_inference(self):
         """Trigger inferring Paras Selection model
         """
 
-        ## TODO: Continue implementing this method
-
-        #######################
-        ### Read data for training and test
-        #######################
-        ## TODO: Read data from folder 'processed_data'
+        ## Read data for train, test and valid
+        dataset_train   = load_dataset('csv', data_files=glob('backup/processed_data/train/*.csv'))
+        dataset_test    = load_dataset('csv', data_files=glob('backup/processed_data/test/*.csv'))
+        dataset_valid   = load_dataset('csv', data_files=glob('backup/processed_data/valid/*.csv'))
 
 
-        #######################
-        ### Specify model
-        #######################
-        ## TODO: Load model from saved
-        model       = None
-        loss        = torch_nn.MSELoss()
+        ## Specify model together with load model
+        model   = ParasScoring().to(args.device)
+
+        assert check_file_existence(PATH['savemodel_ParasSelection']), f"Model not found in {PATH['savemodel_ParasSelection']}"
+        model.load_state_dict(torch.load(PATH['savemodel_ParasSelection']))
 
 
-        #######################
-        ### Start infering
-        #######################
-        ## Infer for every entry of dataset
-        ## TODO: Loop every entry of train, test and valid dataset, decompose into tensors using function 'create_tensors' and feed into mode
+        ## Infer datasets
+        dataset_train   = dataset_train.map(self.f_infer, remove_columns=['goldeness'])
+        dataset_test    = dataset_test.map(self.f_infer, remove_columns=['goldeness'])
+        dataset_valid   = dataset_valid.map(self.f_infer, remove_columns=['goldeness'])
+
+
+        ## Infer dataset
+        dataset_train.to_csv(PATH['data'].replace("[SPLIT]", "train"))
+        dataset_test.to_csv(PATH['data'].replace("[SPLIT]", "test"))
+        dataset_valid.to_csv(PATH['data'].replace("[SPLIT]", "valid"))
 
 
     #########################################################
@@ -207,17 +282,11 @@ class ParasSelection:
             model (torch_nn.Module): model to be saved
         """
 
-        #######################
-        ### Try to create folder
-        ### if not existed
-        #######################
+        ### Try to create folder if not existed
         try:
             os.makedirs(os.path.dirname(PATH['savemodel_ParasSelection']))
         except FileExistsError:
             pass
 
-        #######################
-        ### Try to create folder
-        ### if not existed
-        #######################
         torch.save(model.state_dict(), PATH['savemodel_ParasSelection'])
+     
