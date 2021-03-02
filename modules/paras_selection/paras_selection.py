@@ -1,8 +1,7 @@
 
-from modules.utils import load_object, save_object, check_file_existence
 from modules.paras_selection.ParasSelection import ParasSelection
 from modules.paras_selection.utils import GoldenParas
-from configs import args, logging, PATH
+from configs import logging
 
 
 if __name__ == '__main__':
