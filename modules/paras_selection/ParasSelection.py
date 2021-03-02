@@ -62,7 +62,7 @@ class CustomDataset(Dataset):
 
         assert os.path.isfile(path), f"File {path} not existed."
 
-        self.data_csv   = pd.read_csv(path).drop(columns=['Unnamed: 0']).applymap(lambda x: json.loads(str(x)))
+        self.data_csv   = pd.read_csv(path).applymap(lambda x: json.loads(str(x)))
 
     def __len__(self):
         return len(self.data_csv)
@@ -127,13 +127,13 @@ class ParasSelection:
         #######################
         logging.info("1. Load train, test and eval data")
 
-        path            = glob("./backup/data_parasselection/train.csv")
+        path            = "./backup/data_parasselection/train.csv"
         dataset_train   = CustomDataset(path)
 
-        path            = glob("./backup/data_parasselection/test.csv")
+        path            = "./backup/data_parasselection/test.csv"
         dataset_test    = CustomDataset(path)
 
-        path            = glob("./backup/data_parasselection/valid.csv")
+        path            = "./backup/data_parasselection/valid.csv"
         dataset_valid   = CustomDataset(path)
 
 
