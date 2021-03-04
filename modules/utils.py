@@ -71,6 +71,7 @@ def check_file_existence(path: str) -> bool:
 
     return os.path.isfile(path)
 
+
 class ParallelHelper:
     def __init__(self, f_task: object, data: list,
                  data_allocation: object, n_cores: int = 4):
@@ -96,7 +97,7 @@ class ParallelHelper:
         Returns: a list after running parallel task
 
         """
-        dataset = list()
+        dataset = []
 
         for job in self.jobs:
             job.start()

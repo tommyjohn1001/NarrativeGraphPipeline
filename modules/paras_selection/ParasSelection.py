@@ -71,19 +71,18 @@ class CustomDataset(Dataset):
         return self.data_csv.iloc[index].to_dict()
 
 class ParasSelection:
-    ## TODO: Test this class
-
     #########################################################
     # METHODS FOR TRAINING PROCESS
     #########################################################
-    def train(self, dataloader, model, optimizer, loss, scheduler):
+    def train(self, dataloader, model, optimizer, loss, scheduler=None):
         model.train()
 
         accum_loss  = 0
         for batch in tqdm(dataloader):
             srcs    = torch.vstack(batch['src']).transpose(0, 1).to(args.device)
             masks   = torch.vstack(batch['mask']).transpose(0, 1).to(args.device)
-            trgs    = torch.tensor(batch['trg'], dtype=torch.float32).to(args.device)
+
+            trgs    = batch['trg'].float().to(args.device)
 
             predict     = model(srcs, masks)
 
@@ -91,12 +90,12 @@ class ParasSelection:
 
             output.backward()
             optimizer.step()
-            scheduler.step()
+            # scheduler.step()
 
             accum_loss  += output
 
 
-        return accum_loss / len(dataloader)
+        return accum_loss / len(dataloader) / args.batch_size
 
 
     def eval(self, dataloader, model, loss):
@@ -107,7 +106,7 @@ class ParasSelection:
             for  batch in tqdm(dataloader):
                 srcs    = torch.vstack(batch['src']).transpose(0, 1).to(args.device)
                 masks   = torch.vstack(batch['mask']).transpose(0, 1).to(args.device)
-                trgs    = torch.tensor(batch['trg'], dtype=torch.float32).to(args.device)
+                trgs    = batch['trg'].float().to(args.device)
 
                 predict     = model(srcs, masks)
 
@@ -143,9 +142,14 @@ class ParasSelection:
         logging.info("2. Declare model, optimizer, etc")
 
         model       = ParasScoring().to(args.device)
-        optimizer   = AdamW(model.parameters())
-        scheduler   = get_linear_schedule_with_warmup(optimizer, 1000, len(dataset_train))
-        loss        = torch_nn.MSELoss()
+        optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
+        # scheduler   = get_linear_schedule_with_warmup(optimizer, 1000, len(dataset_train))
+        scheduler = None
+        loss        = torch_nn.SmoothL1Loss()
+
+        if check_file_existence(PATH['savemodel_ParasSelection']):
+            logging.info(f"Model found in {PATH['savemodel_ParasSelection']}")
+            model.load_state_dict(torch.load(PATH['savemodel_ParasSelection']))
 
 
         #######################
@@ -157,7 +161,7 @@ class ParasSelection:
         dataloader_test     = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=True)
         dataloader_valid    = DataLoader(dataset_valid, batch_size=args.batch_size, shuffle=True)
 
-        best_lost_test  = 10e5
+        best_lost_test  = 10e10
         for n_epoch in range(args.n_epochs):
             loss_train  = self.train(dataloader_train, model, optimizer, loss, scheduler)
             loss_test   = self.eval(dataloader_test, model, loss)
@@ -228,14 +232,21 @@ class ParasSelection:
             ## Start inferring with model
             model.eval()
             with torch.no_grad():
+                list_prediction = []
+
                 for ith in range(0, len(src), args.batch_size):
-                    src_    = torch.vstack(src[ith:ith+args.batch_size]).to(args.device)
-                    mask_   = torch.vstack(mask[ith:ith+args.batch_size]).to(args.device)
+
+                    src_    = [torch.LongTensor(x) for x in src[ith:ith+args.batch_size]]
+                    src_    = torch.vstack(src_).to(args.device)
+                    mask_   = [torch.LongTensor(x) for x in mask[ith:ith+args.batch_size]]
+                    mask_   = torch.vstack(mask_).to(args.device)
 
                     predict = model(src_, mask_)
 
-                    if torch.mean(predict) >= FILTERING_THETA:
-                        list_paragraphs.append(paragraph)
+                    list_prediction.append(predict)
+
+                if torch.mean(torch.vstack(list_prediction)) >= FILTERING_THETA:
+                    list_paragraphs.append(paragraph)
 
 
         document['doc_tokens']  = list_paragraphs
@@ -247,26 +258,48 @@ class ParasSelection:
         """Trigger inferring Paras Selection model
         """
 
+        #######################
         ## Read data for train, test and valid
+        #######################
+        logging.info("1. Load data (train, test, valid)")
+
         dataset_train   = load_dataset('csv', data_files=glob('backup/processed_data/train/*.csv'))
         dataset_test    = load_dataset('csv', data_files=glob('backup/processed_data/test/*.csv'))
         dataset_valid   = load_dataset('csv', data_files=glob('backup/processed_data/valid/*.csv'))
 
 
+        #######################
         ## Specify model together with load model
+        #######################
+        logging.info("2. Declare model, optimizer, etc")
+
         model   = ParasScoring().to(args.device)
 
         assert check_file_existence(PATH['savemodel_ParasSelection']), f"Model not found in {PATH['savemodel_ParasSelection']}"
         model.load_state_dict(torch.load(PATH['savemodel_ParasSelection']))
 
 
+        #######################
         ## Infer datasets
-        dataset_train   = dataset_train.map(self.f_infer, remove_columns=['goldeness'])
-        dataset_test    = dataset_test.map(self.f_infer, remove_columns=['goldeness'])
-        dataset_valid   = dataset_valid.map(self.f_infer, remove_columns=['goldeness'])
+        #######################
+        logging.info("3. Start inferring datasets")
+
+        logging.info("3.1. Infer dataset 'train'")
+        dataset_train   = dataset_train.map(self.f_infer, remove_columns=['goldeness'],
+                                            fn_kwargs={'model': model}, num_proc=args.num_proc)
+        logging.info("3.2. Infer dataset 'test'")
+        dataset_test    = dataset_test.map(self.f_infer, remove_columns=['goldeness'],
+                                           fn_kwargs={'model': model}, num_proc=args.num_proc)
+        logging.info("3.3. Infer dataset 'valid'")
+        dataset_valid   = dataset_valid.map(self.f_infer, remove_columns=['goldeness'],
+                                            fn_kwargs={'model': model}, num_proc=args.num_proc)
 
 
-        ## Infer dataset
+        #######################
+        ## Save dataset
+        #######################
+        logging.info("4. Save infered dataset")
+
         dataset_train.to_csv(PATH['data'].replace("[SPLIT]", "train"))
         dataset_test.to_csv(PATH['data'].replace("[SPLIT]", "test"))
         dataset_valid.to_csv(PATH['data'].replace("[SPLIT]", "valid"))

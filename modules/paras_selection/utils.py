@@ -1,8 +1,8 @@
-from datetime import time
 import json
 import glob
 import re
 import os
+import gc
 
 from transformers import BertTokenizer
 from datasets import load_dataset
@@ -25,7 +25,7 @@ MAX_QUESTION_LEN    = 34
 MAX_PARA_LEN        = 475
 
 
-N_SUBSHARDS         = 5
+N_SUBSHARDS         = 3
 
 class GoldenParas():
     def __init__(self) -> None:
@@ -208,63 +208,136 @@ def pad(tokens: list, pad_len: int) -> tuple:
     return tokens + [PAD]*(pad_len-len(tokens)), [1]*len(tokens) + [0]*(pad_len-len(tokens))
 
 
-def f_conv(document, queue):
-    question    = json.loads(document['question_tokens'])
-    paragraphs  = json.loads(document['doc_tokens'])
-    trgs        = json.loads(document['goldeness'])
+# def f_conv(document, queue):
+#     question    = json.loads(document['question_tokens'])
+#     paragraphs  = json.loads(document['doc_tokens'])
+#     trgs        = json.loads(document['goldeness'])
 
-    question_   = pad(question, MAX_QUESTION_LEN)
+#     question_   = pad(question, MAX_QUESTION_LEN)
 
 
-    for paragraph, trg in zip(paragraphs, trgs):
-        for ith in range(0, len(paragraph), MAX_PARA_LEN):
-            paragraph_  = pad(paragraph[ith:ith+MAX_PARA_LEN], MAX_PARA_LEN)
+#     for paragraph, trg in zip(paragraphs, trgs):
+#         for ith in range(0, len(paragraph), MAX_PARA_LEN):
+#             paragraph_  = pad(paragraph[ith:ith+MAX_PARA_LEN], MAX_PARA_LEN)
 
-            pair    = [CLS] + question_[0] + [SEP] + paragraph_[0] + [SEP]
-            mask    = [1]   + question_[1] + [1]   + paragraph_[1] + [1]
+#             pair    = [CLS] + question_[0] + [SEP] + paragraph_[0] + [SEP]
+#             mask    = [1]   + question_[1] + [1]   + paragraph_[1] + [1]
 
-            queue.append({
-                'src'   : pair,
-                'mask'  : mask,
-                'trg'   : trg
-            })
+#             queue.append({
+#                 'doc_id': document['doc_id'],
+#                 'src'   : pair,
+#                 'mask'  : mask,
+#                 'trg'   : trg
+#             })
 
-    return document
+def f_conv(documents, queue):
+    for document in documents.itertuples():
+        question    = json.loads(document.question_tokens)
+        paragraphs  = json.loads(document.doc_tokens)
+        trgs        = json.loads(document.goldeness)
+
+        question_   = pad(question, MAX_QUESTION_LEN)
+
+
+        for paragraph, trg in zip(paragraphs, trgs):
+            for ith in range(0, len(paragraph), MAX_PARA_LEN):
+                paragraph_  = pad(paragraph[ith:ith+MAX_PARA_LEN], MAX_PARA_LEN)
+
+                pair    = [CLS] + question_[0] + [SEP] + paragraph_[0] + [SEP]
+                mask    = [1]   + question_[1] + [1]   + paragraph_[1] + [1]
+
+                queue.put({
+                    'doc_id': document.doc_id,
+                    'src'   : pair,
+                    'mask'  : mask,
+                    'trg'   : trg
+                })
 
 
 def conv():
+    """Convert golden paras file to tensor file for training
+    """
+    # rmv_column_names = ["Unnamed: 0", "doc_tokens", "goldeness",
+    #                     "question_text", "question_tokens", "answer1_text",
+    #                     "answer1_tokens", "answer2_text", "answer2_tokens"]
+
     for split in ['train', 'test', 'valid']:
         paths   = glob.glob(f"./backup/processed_data/{split}/data_*.csv", recursive=True)
 
         if len(paths) > 0:
+            total_para  = 0
+            total_doc   = 0
+
+
+            list_datasets   = []
             paths.sort()
-            for shard, path in enumerate(paths):
+
+            for path in paths:
                 logging.info(f"= Process file {path}")
 
-                for sha in range(N_SUBSHARDS):
-                    dataset = load_dataset('csv', data_files=path)['train'].shard(N_SUBSHARDS, sha)
+                # dataset = load_dataset('csv', data_files=path)['train']
 
-                    list_entries    = list()
-                    dataset.map(f_conv, remove_columns=dataset.column_names[:-2],
-                                num_proc=args.num_proc, fn_kwargs={'queue': list_entries})
+                # for sha in range(N_SUBSHARDS):
+                #     dataset_    = dataset.shard(N_SUBSHARDS, sha, contiguous=True)
 
+
+                #     list_entries    = []
+                #     dataset_.map(f_conv, num_proc=args.num_proc,
+                #                  fn_kwargs={'queue': list_entries})
+
+                #     list_datasets.extend(list_entries)
+
+                #     total_para  += len(list_entries)
+                #     total_doc   += len(dataset_)
+
+
+                dataframe   = pd.read_csv(path)
+                results     = ParallelHelper(f_conv, dataframe, n_cores=args.num_proc,
+                                             data_allocation=lambda data, lo_bound, hi_bound: data.iloc[lo_bound:hi_bound])\
+                                                 .launch()
+
+                list_datasets.extend(results)
+
+                total_para  += len(dataframe)
+                total_doc   += len(results)
+
+                    # dataset_ = None
+                    # gc.collect()
 
                     ### Save data to CSV file
-                    dataset = pd.DataFrame(list_entries)
-                    path_saveFile   = PATH['data_training'].replace("[SPLIT]", split).replace("[N_SHARD]", f"{shard}{sha}")
+                    # path_saveFile   = PATH['data_training'].replace("[SPLIT]", split).replace("[N_SHARD]", f"{shard}{sha}")
 
-                    logging.info(f"= Save file {path_saveFile}")
-                    try:
-                        os.makedirs(os.path.dirname(path_saveFile))
-                    except FileExistsError:
-                        pass
-                    dataset.to_csv(path_saveFile)
+                    # logging.info(f"= Save file {path_saveFile}")
+                    # try:
+                    #     os.makedirs(os.path.dirname(path_saveFile))
+                    # except FileExistsError:
+                    #     pass
 
-                    dataset = None
-    
-    
-        all_filenames = [i for i in glob.glob(f'backup/data_parasselection/{split}/*.csv')]
 
-        combined_csv = pd.concat([pd.read_csv(f) for f in all_filenames ]).drop(columns=['Unnamed: 0'])
-        #export to csv
-        combined_csv.to_csv(f"backup/data_parasselection/{split}.csv", index=False, encoding='utf-8-sig')
+            ## NOTE: This is for testing only
+            dataset = pd.DataFrame(list_datasets)
+            path_saveFile   = PATH['data_training'].replace("[SPLIT]", split)
+            try:
+                os.makedirs(os.path.dirname(path_saveFile))
+            except FileExistsError:
+                pass
+
+            logging.info(f"= Save file {path_saveFile}")
+            dataset.to_csv(path_saveFile)
+
+
+            list_datasets = None
+            gc.collect()
+
+            print(f"Total para : {total_para}")
+            print(f"Total doc  : {total_doc}")
+
+            ## FIXME: Remove the following immediately
+            exit()
+
+
+        # all_filenames = [i for i in glob.glob(f'backup/data_parasselection/{split}/*.csv')]
+
+        # combined_csv = pd.concat([pd.read_csv(f) for f in all_filenames ]).drop(columns=['Unnamed: 0'])
+        # #export to csv
+        # combined_csv.to_csv(f"backup/data_parasselection/{split}.csv", index=False, encoding='utf-8-sig')

@@ -24,6 +24,8 @@ parser.add_argument("--n_shards", type=int, help="Number of chunks to split from
                     default=8)
 parser.add_argument("--device", type=str, default="default", choices=["default", "cpu", "cuda"],
                     help="Select device to run")
+parser.add_argument("--lr", type=float, default=5e-6, help="Learning rate")
+parser.add_argument("--w_decay", type=float, default=0, help="Weight decay")
 
 # args = parser.parse_args()
 args, _ = parser.parse_known_args()
@@ -75,7 +77,7 @@ PATH    = {
 
     ## Paths associated with Paras Selection
     'processed_data'                : "./backup/processed_data/[SPLIT]/data_[N_SHARD].csv",
-    'data_training'                 : "./backup/data_parasselection/[SPLIT]/data_[N_SHARD].csv",
+    'data_training'                 : "./backup/data_parasselection/data___[SPLIT].csv",
     'savemodel_ParasSelection'      : "./backup/saved_model/paras_selector.pt",
 
     ## Paths after ParasSelection
