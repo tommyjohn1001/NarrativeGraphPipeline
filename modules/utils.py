@@ -50,7 +50,7 @@ def save_object(path: str, obj_file: object, is_dataframe:bool = False) -> objec
             logging.warning("=> Folder %s exists.", str(os.path.dirname(path)))
 
     if is_dataframe:
-        obj_file.to_csv(path)
+        obj_file.to_csv(path, index=False)
     else:
         with gzip.open(path, 'w+') as dat_file:
             pickle.dump(obj_file, dat_file)

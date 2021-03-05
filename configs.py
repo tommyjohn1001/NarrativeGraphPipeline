@@ -77,7 +77,7 @@ PATH    = {
 
     ## Paths associated with Paras Selection
     'processed_data'                : "./backup/processed_data/[SPLIT]/data_[N_SHARD].csv",
-    'data_training'                 : "./backup/data_parasselection/data___[SPLIT].csv",
+    'data_training'                 : "./backup/data_parasselection/[SPLIT]/data_[N_SHARD].csv",
     'savemodel_ParasSelection'      : "./backup/saved_model/paras_selector.pt",
 
     ## Paths after ParasSelection
