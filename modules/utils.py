@@ -27,9 +27,9 @@ def load_object(path) -> object:
         return pickle.load(dat_file)
 
 
-def save_object(path: str, obj_file: object, is_dataframe:bool = False) -> object:
+def save_object(path: str, obj_file: object, is_dataframe:bool = True) -> object:
     """
-    Save object to pickle gzip file.
+    Save object to pickle or csv file.
 
     Args:
         path (str): path to file needed to store

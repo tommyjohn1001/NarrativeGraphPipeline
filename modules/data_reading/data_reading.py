@@ -1,16 +1,18 @@
 '''This file contains code reading raw data and do some preprocessing'''
-import os, re
+import re
 
 from datasets import load_dataset
 from bs4 import BeautifulSoup
+import pandas as pd
 import spacy
 
+from modules.utils import save_object
 from configs import args, logging, PATH
 
 
-nlp         = spacy.load("en_core_web_sm")
+nlp         = spacy.load("en_core_web_sm", disable=['ner', 'parser', 'tagger'])
+nlp.max_length = 2500000
 
-MAX_LEN_CONTEXT = 2000
 MAX_LEN_PARA    = 50
 
 
@@ -33,15 +35,9 @@ def f_trigger(document):
     Returns:
         dict: a dict containing new fields with value
     """
+    context = document['document']['text']
+
     ## Preprocess
-
-    ## Trim context
-    start_  = document['document']['start']
-    start_  = document['document']['text'].find(start_)
-    end_    = document['document']['end']
-    end_    = document['document']['text'].rfind(end_)
-
-    context = document['document']['text'][start_:end_]
 
     ## Extract text from HTML
     soup    = BeautifulSoup(context, 'html.parser')
@@ -51,14 +47,26 @@ def f_trigger(document):
     ## Clean and lowercase
     context = clean_text(context)
 
+    start_  = document['document']['start']
+    end_    = document['document']['start']
+    start_  = context.find(start_)
+    end_    = context.rfind(end_)
+
+    if start_ == -1:
+        start_ = 0
+    if end_ == -1:
+        end_ = len(context)
+    context = context[start_:end_]
+
+
+    ## Tokenize
+    tok_context = [tok.text for tok in nlp(context)]
+    ## NOTE: The followings are to lemmatize and remove punctuation. Only used in cosine similarity
     ## Tokenize, remove stopword and lemmatization
-    context = nlp(context)
-
-    tok_context = [] 
-
-    for tok in context:
-        if not (tok.is_stop or tok.is_punct):
-            tok_context.append(tok.lemma_)
+    # tok_context = []
+    # for tok in context:
+    #     if not (tok.is_stop or tok.is_punct):
+    #         tok_context.append(tok.lemma_)
 
     ## Split into paragraphs
     paragraphs  = []
@@ -80,18 +88,17 @@ def trigger_reading_data():
     """
 
     for split in ['validation', 'train', 'test']:
-        logging.info("= Preprocess dataset: %s", split)
+        for shard in range(8):
+            logging.info(f"= Preprocess dataset: {split} - shard {shard}")
 
-        dataset = load_dataset('narrativeqa', split=split)
+            dataset = load_dataset('narrativeqa', split=split).shard(8, shard)
 
-        dataset = dataset.map(f_trigger, num_proc=args.num_proc,
-                              remove_columns=dataset.column_names)
+            dataset = dataset.map(f_trigger, num_proc=args.num_proc,
+                                remove_columns=dataset.column_names)
 
-        path    = PATH['dataset_para'].replace("[SPLIT]", split)
-        if not os.path.isdir(path):
-            os.makedirs(path)
+            path    = PATH['dataset_para'].replace("[SPLIT]", split).replace("[SHARD]", str(shard))
 
-        dataset.save_to_disk(path)
+            save_object(path, pd.DataFrame(dataset))
 
 
 

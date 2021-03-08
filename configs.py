@@ -70,5 +70,5 @@ PATH    = {
 
 
     ## Paths associated with Data Reading
-    'dataset_para'  : "./backup/dataset_paras_[SPLIT]/"
+    'dataset_para'  : "./backup/[SPLIT]/data_[SHARD].csv"
 }
