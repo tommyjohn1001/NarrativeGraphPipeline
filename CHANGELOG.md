@@ -2,15 +2,18 @@
 
 ### This file contains changes and modifications during developing.
 
-## Mar 2, 20221
+## Mar 8, 2021, 12:00 PM
+- Abandon idea of using trained Bert-based Paras Selector and back to idea proposed in paper *Simple and Effective* - using TfIdf
+
+## Mar 2, 2021
 - Use *csv* format instead of *pickle* for data backup
 - Finish implementing training and inferring module for *ParasSelection*
 
-## Feb 21, 20221
+## Feb 21, 2022
 - Use 'DataFrame' in *pandas* to pickle data and for easily deal with 'Dataset' of *huggingface*
 - Reformat the data to be backed up
 
-## Feb 17, 20201
+## Feb 17, 2021
 - Reorder resources of paths of backup file. From now, paths are stored in `configs.py`
 
 ## Feb 16 2021, 15:34 PM

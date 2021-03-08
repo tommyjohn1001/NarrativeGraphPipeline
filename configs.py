@@ -66,20 +66,9 @@ logging.getLogger().setLevel(logging.INFO)
 # Config path of backup files
 ###############################
 PATH    = {
-    'bert_model'                    : f"{args.init_path}/_pretrained/BERT/{args.bert_model}",
+    'bert_model'    : f"{args.init_path}/_pretrained/BERT/{args.bert_model}",
 
 
     ## Paths associated with Data Reading
-    'dataset_para_train'            : "./backup/dataset_para/dataset_para_train_[N_SHARD].pkl",
-    'dataset_para_test'             : "./backup/dataset_para/dataset_para_test_[N_SHARD].pkl",
-    'dataset_para_validation'       : "./backup/dataset_para/dataset_para_valid_[N_SHARD].pkl",
-
-
-    ## Paths associated with Paras Selection
-    'processed_data'                : "./backup/processed_data/[SPLIT]/data_[N_SHARD].csv",
-    'data_training'                 : "./backup/data_parasselection/[SPLIT]/data_[N_SHARD].csv",
-    'savemodel_ParasSelection'      : "./backup/saved_model/paras_selector.pt",
-
-    ## Paths after ParasSelection
-    'data'                          : "./backup/data_[SPLIT].csv"
+    'dataset_para'  : "./backup/dataset_paras_[SPLIT]/"
 }
