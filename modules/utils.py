@@ -74,17 +74,17 @@ def check_file_existence(path: str) -> bool:
 
 class ParallelHelper:
     def __init__(self, f_task: object, data: list,
-                 data_allocation: object, n_cores: int = 4):
+                 data_allocation: object, num_proc: int = 4):
         self.n_data = len(data)
 
         self.queue  = multiprocessing.Queue()
         self.pbar   = tqdm(total=self.n_data)
 
         self.jobs = list()
-        for ith in range(n_cores):
-            lo_bound = ith * self.n_data // n_cores
-            hi_bound = (ith + 1) * self.n_data // n_cores \
-                if ith < (n_cores - 1) else self.n_data
+        for ith in range(num_proc):
+            lo_bound = ith * self.n_data // num_proc
+            hi_bound = (ith + 1) * self.n_data // num_proc \
+                if ith < (num_proc - 1) else self.n_data
 
             p = multiprocessing.Process(target=f_task,
                                         args=(data_allocation(data, lo_bound, hi_bound),
