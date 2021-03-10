@@ -144,9 +144,9 @@ def f_trigger(documents, queue):
         neighbor_paras_ques.discard(question)
 
         neighbor_paras_answ1 = {answer1}
-        find_golden(question, wm, 0, neighbor_paras_answ1)
+        find_golden(answer1, wm, 0, neighbor_paras_answ1)
         neighbor_paras_answ2 = {answer2}
-        find_golden(question, wm, 0, neighbor_paras_answ2)
+        find_golden(answer2, wm, 0, neighbor_paras_answ2)
 
         neighbor_paras_answ = neighbor_paras_answ1 | neighbor_paras_answ2
         neighbor_paras_answ.discard(answer1)
