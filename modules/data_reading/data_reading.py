@@ -1,5 +1,5 @@
 '''This file contains code reading raw data and do some preprocessing'''
-import re, ast
+import re
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from datasets import load_dataset
@@ -9,12 +9,14 @@ import pandas as pd
 import numpy as np
 import spacy
 
-from modules.utils import save_object, ParallelHelper
+from modules.utils import save_object, ParallelHelper, check_file_existence
 from configs import args, logging, PATH
 
 
-nlp             = spacy.load("en_core_web_sm",
-                             disable=['ner', 'parser', 'tagger', 'lemmatizer'])
+log = logging.getLogger("spacy")
+log.setLevel(logging.ERROR)
+
+nlp             = spacy.load("en_core_web_sm", disable=['ner', 'parser', 'tagger'])
 nlp.max_length  = 2500000
 
 MAX_LEN_PARA    = 50
@@ -132,7 +134,7 @@ def f_trigger(documents, queue):
 
         paras_preprocessed.append(document['question']['text'].lower())
         paras_preprocessed.append(document['answers'][0]['text'].lower())
-        paras_preprocessed.append(document['answers'][0]['text'].lower())
+        paras_preprocessed.append(document['answers'][1]['text'].lower())
 
 
         wm = tfidfvectorizer.fit_transform(paras_preprocessed).toarray()
@@ -161,12 +163,19 @@ def f_trigger(documents, queue):
             'Hn'        : [paras[i] for i in neighbor_paras_ques]
         })
 
+
 def trigger_reading_data():
     """ Start reading and processing data
     """
 
     for split in ['validation', 'train', 'test']:
         for shard in range(8):
+            ### Need to check whether this shard has already been processed
+            path    = PATH['dataset_para'].replace("[SPLIT]", split).replace("[SHARD]", str(shard))
+            if check_file_existence(path):
+                continue
+
+
             logging.info(f"= Preprocess dataset: {split} - shard {shard}")
 
             dataset = load_dataset('narrativeqa', split=split).shard(8, shard)
@@ -175,13 +184,7 @@ def trigger_reading_data():
                                              lambda d, lo, hi: d.select(range(lo, hi)),
                                              num_proc=args.num_proc).launch()
 
-            # list_documents = []
-            # for document in tqdm(dataset):
-            #     list_documents.append(f_trigger(document))
-
-            path    = PATH['dataset_para'].replace("[SPLIT]", split).replace("[SHARD]", str(shard))
             save_object(path, pd.DataFrame(list_documents))
-
 
 
 if __name__ == '__main__':
