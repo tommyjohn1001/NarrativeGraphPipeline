@@ -40,7 +40,7 @@ if args.working_place == "local":
 elif args.working_place == "remote":
     args.init_path  = "/home/ubuntu"
 elif args.working_place == "local2":
-    args.init_path = "/home/tommy/Projects/VinAI"
+    args.init_path = "/home/tommy/Projects"
 else:
     print("Err: Invalid init path. Exiting..")
     sys.exit(1)
