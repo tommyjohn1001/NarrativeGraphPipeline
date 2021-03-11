@@ -2,7 +2,6 @@
 
 import argparse
 import logging
-import sys
 
 import torch
 
@@ -12,8 +11,6 @@ import torch
 ###############################
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--working_place", choices=['local', 'remote', 'local2'],
-                    help="working environment", default='remote')
 parser.add_argument("--batch_size", type=int, default=1)
 parser.add_argument("--num_proc", type=int, default=4, help="number of processes")
 parser.add_argument("--n_epochs", type=int, default=10)
@@ -34,16 +31,6 @@ args, _ = parser.parse_known_args()
 ###############################
 # Add several necessary argument
 ###############################
-## args = working_place
-if args.working_place == "local":
-    args.init_path  = "/Users/hoangle/Projects/VinAI"
-elif args.working_place == "remote":
-    args.init_path  = "/home/ubuntu"
-elif args.working_place == "local2":
-    args.init_path = "/home/tommy/Projects"
-else:
-    print("Err: Invalid init path. Exiting..")
-    sys.exit(1)
 
 
 ## args = device
@@ -66,9 +53,6 @@ logging.getLogger().setLevel(logging.INFO)
 # Config path of backup files
 ###############################
 PATH    = {
-    'bert_model'    : f"{args.init_path}/_pretrained/BERT/{args.bert_model}",
-
-
     ## Paths associated with Data Reading
     'dataset_para'  : "./backup/[SPLIT]/data_[SHARD].csv"
 }

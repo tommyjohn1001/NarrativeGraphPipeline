@@ -2,6 +2,10 @@
 
 ### This file contains changes and modifications during developing.
 
+## Mar1, 2021, 16:50 PM
+- Finish *FineGrain* module with single question and paragraph as input
+- Modify *config* file
+
 ## Mar 8, 2021, 12:00 PM
 - Abandon idea of using trained Bert-based Paras Selector and back to idea proposed in paper *Simple and Effective* - using TfIdf
 
