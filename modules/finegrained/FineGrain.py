@@ -99,9 +99,6 @@ class FineGrain(torch_nn.Module):
         # question  : [batch, seq_len_ques, d_hid]
         # paragraphs: [batch, n_paras, seq_len_ques, d_hid]
 
-        print(question.shape)
-        print(paragraphs.shape)
-
         #########################
         # Convert to final 'paragraphs' tensor
         #########################
@@ -111,9 +108,6 @@ class FineGrain(torch_nn.Module):
 
         paragraphs  = torch.sum(paragraphs, dim=2)
         # paragraphs: [batch, n_paras, d_hid]
-
-        print(question.shape)
-        print(paragraphs.shape)
 
         paragraphs  = torch.cat((paragraphs, question), dim=1)
         # paragraphs: [batch, n_paras+1, d_hid]

@@ -42,6 +42,11 @@ else:
 ## other args
 args.multi_gpus = torch.cuda.device_count() > 0
 
+args.seq_len_ques   = 40
+args.seq_len_para   = 40
+args.seq_len_ans    = 12
+args.n_paras        = 40
+
 
 ###############################
 # Config logging
