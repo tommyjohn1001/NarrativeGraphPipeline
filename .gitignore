@@ -147,3 +147,4 @@ testing/
 .vscode
 backup*
 cmd_for_tessera.sh
+.vector_cache

@@ -17,7 +17,7 @@ class FineGrain(torch_nn.Module):
         self.d_emb  = d_emb
 
         ## Modules for embedding
-        self.embedding      = BertModel.from_pretrained(args.bert_model)
+        self.embedding      = BertModel.from_pretrained(bert_model)
         self.biGRU_emb      = torch_nn.GRU(d_emb, d_hid//2, num_layers=5,
                                            batch_first=True, bidirectional=True)
         self.linear_embd    = torch_nn.Linear(d_emb, d_emb)
@@ -36,13 +36,14 @@ class FineGrain(torch_nn.Module):
         # paras      : [batch, n_paras, seq_len_para]
         # paras_mask : [batch, n_paras, seq_len_para]
 
-        batch, seq_len_ques         = ques.shape
-        _, n_paras, seq_len_para    = paras.shape
-
         #########################
         # Operate CoAttention question
         # with each paragraph
         #########################
+        seq_len_para    = args.seq_len_para
+        seq_len_ques    = args.seq_len_ques
+        batch           = args.batch
+        n_paras         = args.n_paras
 
         question    = torch.zeros((batch, seq_len_ques, self.d_hid))
         paragraphs  = None

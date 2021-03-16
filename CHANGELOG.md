@@ -1,6 +1,8 @@
 # CHANGELOG
 
 ### This file contains changes and modifications during developing.
+## Mar 16, 2021, 12:54 PM
+- Finish module *FineGrain*, *CustomDataset*, *IAL*
 
 ## Mar1, 2021, 16:50 PM
 - Finish *FineGrain* module with single question and paragraph as input

@@ -19,8 +19,5 @@ Run the following:
 ### 3.1. Data reading
 Read stories and scripts from files, initially preprocess and decompose them into paragraphs.
 
-#### Data flow:
-**Input** 
 
-**Output**
-### 3.2. Paras selection
+

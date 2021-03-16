@@ -1,3 +1,6 @@
+'''This file contain modules for loading data and training procedure. Other component layers
+are in other directories.'''
+
 import glob, ast
 
 import torch.nn. functional as torch_f
@@ -10,12 +13,11 @@ import torch
 
 from configs import args
 
-
 tokenizer   = BertTokenizer.from_pretrained(args.bert_model)
-
 nlp         = spacy.load("en_core_web_sm", disable=['ner', 'parser', 'tagger', "lemmatizer"])
 
 
+# NOTE: This class is to create Dataset instance for training. This class belongs to my proposal pipeline.
 class CustomDataset(Dataset):
     def __init__(self, path_csv_dir):
         file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
@@ -74,7 +76,7 @@ class CustomDataset(Dataset):
 
         para_En_mask    = torch_f.pad(para_En, (0, 0, 0, args.n_paras - para_En.shape[0]))
         para_En         = torch_f.pad(para_En, (0, 0, 0, args.n_paras - para_En.shape[0]))
-        
+
 
         ## Process each paragraph in Hn: tokenize, pad, create mask
         list_para_batch, list_para_mask_batch = [], []

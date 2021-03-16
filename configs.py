@@ -11,12 +11,11 @@ import torch
 ###############################
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--batch_size", type=int, default=1)
+parser.add_argument("--batch", type=int, default=1)
 parser.add_argument("--num_proc", type=int, default=4, help="number of processes")
 parser.add_argument("--n_epochs", type=int, default=10)
 parser.add_argument("--bert_model", type=str, default="bert-base-uncased",
                     help="default pretrain BERT model")
-parser.add_argument("--task", type=str, help="Select task to do")
 parser.add_argument("--n_shards", type=int, help="Number of chunks to split from large dataset",
                     default=8)
 parser.add_argument("--device", type=str, default="default", choices=["default", "cpu", "cuda"],
@@ -42,10 +41,10 @@ else:
 ## other args
 args.multi_gpus = torch.cuda.device_count() > 0
 
-args.seq_len_ques   = 40
-args.seq_len_para   = 40
-args.seq_len_ans    = 12
-args.n_paras        = 40
+args.seq_len_ques       = 40
+args.seq_len_para       = 40
+args.seq_len_ans        = 12
+args.n_paras            = 40
 
 
 ###############################
