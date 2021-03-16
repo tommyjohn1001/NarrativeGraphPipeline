@@ -145,4 +145,6 @@ cython_debug/
 # Redundant folders
 testing/
 .vscode
-backup
+backup*
+cmd_for_tessera.sh
+.vector_cache
