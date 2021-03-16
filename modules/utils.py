@@ -27,9 +27,9 @@ def load_object(path) -> object:
         return pickle.load(dat_file)
 
 
-def save_object(path, obj_file) -> object:
+def save_object(path: str, obj_file: object, is_dataframe:bool = True) -> object:
     """
-    Save object to pickle gzip file.
+    Save object to pickle or csv file.
 
     Args:
         path (str): path to file needed to store
@@ -49,8 +49,11 @@ def save_object(path, obj_file) -> object:
         except FileExistsError:
             logging.warning("=> Folder %s exists.", str(os.path.dirname(path)))
 
-    with gzip.open(path, 'w+') as dat_file:
-        pickle.dump(obj_file, dat_file)
+    if is_dataframe:
+        obj_file.to_csv(path, index=False)
+    else:
+        with gzip.open(path, 'w+') as dat_file:
+            pickle.dump(obj_file, dat_file)
 
 
 ########################################################
@@ -68,22 +71,24 @@ def check_file_existence(path: str) -> bool:
 
     return os.path.isfile(path)
 
+
 class ParallelHelper:
-    def __init__(self, f_task, data: list, n_cores: int = 4, *args):
+    def __init__(self, f_task: object, data: list,
+                 data_allocation: object, num_proc: int = 4):
         self.n_data = len(data)
 
         self.queue  = multiprocessing.Queue()
         self.pbar   = tqdm(total=self.n_data)
 
         self.jobs = list()
-        for ith in range(n_cores):
-            low_bound = ith * self.n_data // n_cores
-            hi_bound = (ith + 1) * self.n_data // n_cores \
-                if ith < (n_cores - 1) else self.n_data
+        for ith in range(num_proc):
+            lo_bound = ith * self.n_data // num_proc
+            hi_bound = (ith + 1) * self.n_data // num_proc \
+                if ith < (num_proc - 1) else self.n_data
 
             p = multiprocessing.Process(target=f_task,
-                                        args=(data[low_bound: hi_bound],
-                                              self.queue, *args))
+                                        args=(data_allocation(data, lo_bound, hi_bound),
+                                              self.queue))
             self.jobs.append(p)
 
     def launch(self) -> list:
@@ -92,7 +97,7 @@ class ParallelHelper:
         Returns: a list after running parallel task
 
         """
-        dataset = list()
+        dataset = []
 
         for job in self.jobs:
             job.start()
@@ -106,6 +111,9 @@ class ParallelHelper:
                 self.pbar.update()
 
         self.pbar.close()
+
+        for job in self.jobs:
+            job.terminate()
 
         for job in self.jobs:
             job.join()
