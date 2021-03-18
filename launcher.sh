@@ -10,7 +10,7 @@ launch()
     python -m modules.data_reading.data_reading --num_proc 5
 
     # echo "2. Start training"
-    python -m modules.narrativepieline.NarrativePipeline  --num_proc 5
+    python -m modules.narrativepipeline.NarrativePipeline
 }
 
 

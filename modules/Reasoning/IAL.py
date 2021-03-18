@@ -7,7 +7,7 @@ from configs import args
 Block   = 200
 
 class IntrospectiveAlignmentLayer(torch_nn.Module):
-    def __init__(self, d_hid=256, d_emb=200):
+    def __init__(self, d_hid=args.dim_hid, d_emb=200):
         super().__init__()
 
         self.d_hid  = d_hid
@@ -29,6 +29,9 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         # paras      : [batch, seq_len_contex, d_embd]
 
         batch, seq_len_context, _ = paras.shape
+
+        ques    = torch_f.relu(ques)
+        paras   = torch_f.relu(paras)
 
         # Input and Context embedding
         H_q = self.biLSTM_emb(ques)[0]
