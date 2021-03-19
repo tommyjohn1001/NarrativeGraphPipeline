@@ -5,7 +5,12 @@ import pickle
 import gzip
 import os
 
+import torch.nn.functional as torch_f
+import torch.nn as torch_nn
+import torch
 from tqdm import tqdm
+
+from configs import args
 
 
 ########################################################
@@ -120,3 +125,45 @@ class ParallelHelper:
 
 
         return dataset
+
+
+########################################################
+# Common layers
+########################################################
+class NonLinear(torch_nn.Module):
+    def __init__(self, d_in, d_out, activation="sigmoid", dropout=args.dropout):
+        super().__init__()
+
+        self.linear     = torch_nn.Linear(d_in, d_out)
+
+        if activation == "relu":
+            self.activation = torch_nn.ReLU()
+        elif activation == "tanh":
+            self.activation = torch_nn.Tanh()
+        else:
+            self.activation = torch_nn.Sigmoid()
+
+        self.dropout    = torch_nn.Dropout(dropout)
+
+    def forward(self, X):
+        X   = self.activation(self.linear(X))
+        X   = self.dropout(X)
+
+        return X
+
+class EmbeddingLayer(torch_nn.Module):
+    def __init__(self, d_embd=args.d_embd, d_hid=args.d_hid):
+        super().__init__()
+
+        self.biLSTM_emb     = torch_nn.LSTM(d_embd, d_hid//2, num_layers=args.n_layers,
+                                           batch_first=True, bidirectional=True)
+
+    def forward(self, X):
+        # X: [batch, x, d_embd]
+        X   = torch_f.relu(X)
+        X   = self.biLSTM_emb(X)[0]
+
+        ## TODO: Add pad_pack
+
+        # X: [batch, x, d_hid]
+        return X

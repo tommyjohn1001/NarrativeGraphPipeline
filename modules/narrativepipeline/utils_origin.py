@@ -3,7 +3,8 @@ are in other directories.'''
 from multiprocessing import Pool
 import glob, ast, gc
 
-
+import torch.nn.functional as torch_f
+import torch.nn as torch_nn
 from torch.utils.data import Dataset
 from torchtext.vocab import Vectors
 from bs4 import BeautifulSoup

@@ -1,6 +1,11 @@
 # CHANGELOG
 
 ### This file contains changes and modifications during developing.
+
+## Mar 19, 2021, 18:05 PM
+- Finish implementing *PointerGeneratorDecoder*
+- Add question tokens to global vocab of *PointerGeneratorDecoder*
+
 ## Mar 16, 2021, 12:54 PM
 - Finish module *FineGrain*, *CustomDataset*, *IAL*
 

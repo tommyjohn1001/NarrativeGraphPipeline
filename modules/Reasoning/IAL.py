@@ -2,22 +2,22 @@ import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 
+from modules.utils import NonLinear
 from configs import args
 
 Block   = 200
 
 class IntrospectiveAlignmentLayer(torch_nn.Module):
-    def __init__(self, d_hid=args.dim_hid, d_emb=200):
+    def __init__(self, d_hid=args.d_hid, d_emb=200):
         super().__init__()
 
         self.d_hid  = d_hid
-        self.d_emb  = d_emb
 
 
         self.biLSTM_emb     = torch_nn.LSTM(d_emb, d_hid//2, num_layers=5,
                                            batch_first=True, bidirectional=True)
 
-        self.linearIAL      = torch_nn.Linear(d_hid, d_hid)
+        self.linearIAL      = NonLinear(d_hid, d_hid)
 
         self.linearReason   = torch_nn.Linear(4*d_hid, 4*d_hid)
 
@@ -41,8 +41,8 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
 
 
         # Introspective Alignment
-        H_q = torch.sigmoid(self.linearIAL(H_q))
-        H_c = torch.sigmoid(self.linearIAL(H_c))
+        H_q = self.linearIAL(H_q)
+        H_c = self.linearIAL(H_c)
         # H_q: [batch, seq_len_ques, d_hid]
         # H_c: [batch, seq_len_context, d_hid]
 

@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 from datasets import load_dataset
@@ -19,16 +18,16 @@ class AttentivePooling(torch_nn.Module):
         self.linear = torch_nn.Linear(dim, 1)
 
     def forward(self, X):
-        # X: [batch, seq_len_ques, d_hid]
+        # X: [batch, x, dim]
         batch, seq_len_ques, _ = X.shape
 
         X_      = torch.tanh(X)
         alpha   = torch.softmax(self.linear(X_), dim=1)
-        # alpha: [batch, seq_len_question, 1]
-        r       = torch.bmm(torch.reshape(X, (batch, -1, seq_len_ques), alpha))
-        # r: [batch, d_hid, 1]
+        # alpha: [batch, x, 1]
+        r       = torch.bmm(torch.reshape(X, (batch, -1, seq_len_ques)), alpha)
+        # r: [batch, dim, 1]
 
-        return r.squeeze()
+        return r.squeeze(-1)
 
 def build_vocab_PGD():
     """ Build vocab for Pointer Generator Decoder. """
@@ -40,6 +39,8 @@ def build_vocab_PGD():
 
     read_stories    = set()
     word_count      = defaultdict(int)
+
+    answer_toks     = set()
 
     # Read stories in train, test, valid set
     for split in ["train", "test", "validation"]:
@@ -77,11 +78,21 @@ def build_vocab_PGD():
             context = context[start_:end_]
 
             for tok in nlp(context):
-                word_count[tok.text] += 1
+                if  not tok.is_punct and\
+                    not tok.is_stop and\
+                    not tok.like_url:
+                    word_count[tok.text] += 1
+
+            # Tokenize answer1 and answer2, answer tokens are added to global vocab
+            for tok in entry['answers'][0]['tokens'] + entry['answers'][1]['tokens']:
+                answer_toks.add(tok.lower())
 
     # Filter words
-    words = [w for w, occurence in word_count.items() if occurence > args.min_count_PGD]
+    words = set(w for w, occurence in word_count.items() if occurence >= args.min_count_PGD)
+
+    words = words.union(answer_toks)
 
     # Write vocab to TXT file
     with open(PATH['vocab_PGD'], 'w+') as vocab_file:
-        vocab_file.writelines(words)
+        for word in words:
+            vocab_file.write(word + '\n')

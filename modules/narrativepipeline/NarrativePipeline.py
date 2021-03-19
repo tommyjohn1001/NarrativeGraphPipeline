@@ -2,12 +2,16 @@ import torch.nn.functional as F
 import torch.nn as torch_nn
 import torch
 
+
+from modules.narrativepipeline.utils_origin import Embeddinglayer
 from modules.pg_decoder.utils import build_vocab_PGD
 from configs import args, logging
 
 class NarrativePipeline():
     def __init__(self):
         super().__init__()
+
+        self.embd_layer = Embeddinglayer()
 
         ################################
         # Build vocab for PointerGeneratorDecoder
@@ -16,7 +20,10 @@ class NarrativePipeline():
         build_vocab_PGD()
 
     def train(self, model, iterator_train, loss, optimizer):
-        pass
+        for batch in range(args.batch):
+            # TODO: Use EmbeddingLayer for question, context and answer 1
+            # TODO: Use scheduler, clip_grad_norm
+            pass
 
     def test(self, model, iterator_test):
         pass
