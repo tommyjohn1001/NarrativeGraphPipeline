@@ -9,13 +9,13 @@ import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 from tqdm import tqdm
+from rouge import Rouge
+from nltk.translate.meteor_score import meteor_score
+from nltk.translate.bleu_score import sentence_bleu
 
 from configs import args
 
 
-########################################################
-# Functions to deal with `pkl` files
-########################################################
 def load_object(path) -> object:
     """
     Load object from pickle gzip file
@@ -61,9 +61,6 @@ def save_object(path: str, obj_file: object, is_dataframe:bool = True) -> object
             pickle.dump(obj_file, dat_file)
 
 
-########################################################
-# Simple file manipulating operations
-########################################################
 def check_file_existence(path: str) -> bool:
     """
     Check whether file given by `path` exists.
@@ -127,9 +124,52 @@ class ParallelHelper:
         return dataset
 
 
+BETA    = 1.2
+EPS     = 10e-10
+def get_scores(pred, trg):
+    """Calculate BLEU-1, BLEU4, METEOR and ROUGE_L.
+
+    Args:
+        pred (str): predicted string
+        trg (str): expected string
+
+    Returns:
+        tuple: tuple containing scores
+    """
+
+    rouge_l = Rouge().get_scores(pred, trg, avg=True)['rouge-l']
+
+    bleu_1 = sentence_bleu(pred, trg, weights=(1, 0, 0, 0))
+    bleu_4 = sentence_bleu(pred, trg, weights=(0.25, 0.25, 0.25, 0.25))
+    meteor = meteor_score(pred, trg)
+    if rouge_l['r'] + BETA**2*rouge_l['p'] < EPS:
+        rouge_l = 0
+    else:
+        rouge_l = ((1 + BETA**2)*rouge_l['p']*rouge_l['r'])/(rouge_l['r'] + BETA**2*rouge_l['p'])
+
+    if bleu_1 < EPS:
+        bleu_1 = 0
+    if bleu_4 < EPS:
+        bleu_4 = 0
+
+    return bleu_1, bleu_4, meteor, rouge_l
+
 ########################################################
-# Common layers
+# Common layers and functions regarding deep model
 ########################################################
+def transpose(X:torch.Tensor, d1=1, d2=2):
+    """Dedicated function to transpose 2 last dimensions of 3D tensor.
+
+    Args:
+        X (torch.Tensor): Tensor to be transposed
+        d1 (int, optional): First dim. Defaults to 1.
+        d2 (int, optional): Second dim. Defaults to 2.
+
+    Returns:
+        tensor: Tensor after transposing
+    """
+    return X.transpose(d1, d2)
+
 class NonLinear(torch_nn.Module):
     def __init__(self, d_in, d_out, activation="sigmoid", dropout=args.dropout):
         super().__init__()

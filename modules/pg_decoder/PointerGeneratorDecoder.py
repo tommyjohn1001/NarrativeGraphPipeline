@@ -2,7 +2,7 @@
 import torch.nn as torch_nn
 import torch
 
-from modules.utils import NonLinear, EmbeddingLayer
+from modules.utils import NonLinear, EmbeddingLayer, transpose
 from modules.pg_decoder.utils import *
 from configs import args
 
@@ -40,11 +40,11 @@ class PointerGeneratorDecoder(torch_nn.Module):
         self.linear_ph2     = torch_nn.Linear(self.n_layers, 1, bias=False)
         self.linear_py      = torch_nn.Linear(self.d_hid_PGD, 1)
 
-    def forward(self, Y, H_q, trg, trg_mask):
+    def forward(self, Y, H_q, ans, ans_mask):
         # Y         : [batch, seq_len_cntx, d_hid * 2]
         # H_q       : [batch, seq_len_ques, d_hid]
-        # trg       : [batch, max_len_ans, d_embd]
-        # trg_mask  : [batch, max_len_ans]
+        # ans       : [batch, max_len_ans, d_embd]
+        # ans_mask  : [batch, max_len_ans]
 
         batch   = Y.shape[0]
 
@@ -54,10 +54,10 @@ class PointerGeneratorDecoder(torch_nn.Module):
         def F_h(h_t):
             # h_t: [batch, n_layers, d_hid_PGD]
 
-            h_t = self.linear_h1(torch.reshape(h_t, (batch, self.d_hid_PGD, -1)))
+            h_t = self.linear_h1(transpose(h_t))
             # h_t: [batch, d_hid_PGD, seq_len_cntx]
 
-            h_t = self.linear_h2(torch.reshape(h_t, (batch, -1, self.d_hid_PGD)))
+            h_t = self.linear_h2(transpose(h_t))
             # h_t: [batch, seq_len_cntx, d_hid_PGD]
 
             return h_t
@@ -83,7 +83,7 @@ class PointerGeneratorDecoder(torch_nn.Module):
         def F_v(h_t):
             # h_t: [batch, n_layers, d_hid_PGD]
 
-            v_t = self.linear_v1(torch.reshape(h_t, (batch, self.d_hid_PGD, -1))).squeeze(-1)
+            v_t = self.linear_v1(transpose(h_t)).squeeze(-1)
             # v_t: [batch, d_hid_PGD]
 
             v_t = self.linear_v2(v_t)
@@ -95,8 +95,8 @@ class PointerGeneratorDecoder(torch_nn.Module):
         Y_      = F_a(Y)
         H_q     = F_q(H_q)
 
-        trg_    = self.embedding(trg)
-        # trg_: [batch, max_len_ans, d_hid_PGD]
+        ans_    = self.embedding(ans)
+        # ans_: [batch, max_len_ans, d_hid_PGD]
 
         # CLS is used to initialize LSTM
         cls_tok = torch.zeros((batch, 1, self.d_hid_PGD))
@@ -104,8 +104,8 @@ class PointerGeneratorDecoder(torch_nn.Module):
         h_t     = torch.zeros((batch, self.n_layers, self.d_hid_PGD))
         c_t     = torch.zeros((batch, self.n_layers, self.d_hid_PGD))
 
-        pred    = torch.zeros((batch, self.max_len_ans))
-        # pred: [batch, max_len_ans]
+        pred    = torch.zeros((batch, self.max_len_ans, self.d_vocab + self.seq_len_cntx))
+        # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
 
         #################################
         # For each timestep, infer answer word
@@ -118,7 +118,7 @@ class PointerGeneratorDecoder(torch_nn.Module):
             # g: [batch, seq_len_cntx, d_hid_PGD]
             a_t = self.linear_a(g)
             # a_t: [batch, seq_len_cntx, 1]
-            y_t = torch.bmm(torch.reshape(a_t, (batch, -1, self.seq_len_cntx)), g)
+            y_t = torch.bmm(transpose(a_t), g)
             # y_t: [batch, 1, d_hid_PGD]
 
             ###################
@@ -127,12 +127,12 @@ class PointerGeneratorDecoder(torch_nn.Module):
             if t == 0:
                 tmp = torch.cat((y_t, cls_tok), dim=2)
             else:
-                tmp = torch.cat((y_t, trg_[:,t-1,:].unsqueeze(1)), dim=2)
+                tmp = torch.cat((y_t, ans_[:,t-1,:].unsqueeze(1)), dim=2)
             # tmp: [batch, 1, d_hid_PGD * 2]
-            _, (h_t, c_t)   = self.lstm(tmp, (h_t.reshape(self.n_layers, batch, -1),
-                                              c_t.reshape(self.n_layers, batch, -1)))
-            h_t = h_t.reshape((batch, self.n_layers, -1))
-            c_t = c_t.reshape((batch, self.n_layers, -1))
+            _, (h_t, c_t)   = self.lstm(tmp, (h_t.transpose(0, 1),
+                                              c_t.transpose(0, 1)))
+            h_t = h_t.transpose(0, 1)
+            c_t = c_t.transpose(0, 1)
             # h_t: [batch, n_layers, d_hid_PGD]
             # c_t: [batch, n_layers, d_hid_PGD]
 
@@ -167,12 +167,14 @@ class PointerGeneratorDecoder(torch_nn.Module):
             v_t     = torch.bmm(v_t, (torch.ones((batch)) - p_t).unsqueeze(-1)).squeeze(-1)
             # a_t, v_t: [batch, d_vocab + seq_len_cntx]
 
-            w_t     = torch.argmax(a_t + v_t, 1)
-            # w_t: [batch]
+            w_t     = a_t + v_t
+            # w_t: [batch, d_vocab + seq_len_cntx]
 
-            pred[:, t]  = w_t
+            pred[:, t, :]   = w_t
 
-        # Multiply 'pred' with 'trg_mask' to ignore masked position in tensor 'pred'
-        pred    = torch.mul(pred, trg_mask)
+        ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab + self.seq_len_cntx)
+        # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
+        pred    = torch.mul(pred, ans_mask)
 
+        # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
         return pred

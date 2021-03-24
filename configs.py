@@ -48,9 +48,8 @@ args.n_paras            = 40
 args.d_embd             = 200
 args.d_hid              = 256
 args.max_len_ans        = 12
-args.teacher_forcing    = 0.3
 args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
-args.d_vocab            = 124555    # Vocab size
+args.d_vocab            = 131059    # Vocab size
 args.dropout            = 0.2
 args.n_layers           = 5
 
@@ -66,6 +65,7 @@ logging.getLogger().setLevel(logging.INFO)
 ###############################
 PATH    = {
     ## Paths associated with Data Reading
-    'dataset_para'  : "./backup/[SPLIT]/data_[SHARD].csv",
-    'vocab_PGD'     : "./backup/vocab_PGD.txt"
+    'dataset_para'  : "backup/[SPLIT]/data_[SHARD].csv",
+    'vocab_PGD'     : "backup/vocab_PGD.txt",
+    'saved_model'   : "backup/model.pt"
 }

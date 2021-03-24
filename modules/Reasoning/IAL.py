@@ -2,7 +2,7 @@ import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 
-from modules.utils import NonLinear
+from modules.utils import NonLinear, transpose
 from configs import args
 
 Block   = 200
@@ -24,20 +24,11 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         self.biLSTM_attn    = torch_nn.LSTM(8*d_hid, d_hid, num_layers=5,
                                            batch_first=True, bidirectional=True)
 
-    def forward(self, ques, paras):
-        # ques       : [batch, seq_len_ques, d_embd]
-        # paras      : [batch, seq_len_contex, d_embd]
+    def forward(self, H_q, H_c):
+        # H_q   : [batch, seq_len_ques, d_hid]
+        # H_c   : [batch, seq_len_contex, d_hid]
 
-        batch, seq_len_context, _ = paras.shape
-
-        ques    = torch_f.relu(ques)
-        paras   = torch_f.relu(paras)
-
-        # Input and Context embedding
-        H_q = self.biLSTM_emb(ques)[0]
-        H_c = self.biLSTM_emb(paras)[0]
-        # H_q: [batch, seq_len_ques, d_hid]
-        # H_c: [batch, seq_len_context, d_hid]
+        batch, seq_len_context, _ = H_c.shape
 
 
         # Introspective Alignment
@@ -46,7 +37,7 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         # H_q: [batch, seq_len_ques, d_hid]
         # H_c: [batch, seq_len_context, d_hid]
 
-        E   = torch.bmm(H_c, torch.reshape(H_q, (batch, self.d_hid, -1)))
+        E   = torch.bmm(H_c, transpose(H_q))
         # E: [batch, seq_len_context, seq_len_ques]
         A   = torch.bmm(torch_f.softmax(E, dim=1), H_q)
         # A: [batch, seq_len_context, d_hid]
