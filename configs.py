@@ -43,7 +43,7 @@ args.multi_gpus = torch.cuda.device_count() > 0
 
 args.seq_len_ques       = 40
 args.seq_len_para       = 40
-args.seq_len_ans        = 12
+args.seq_len_ans        = 20
 args.n_paras            = 40
 args.d_embd             = 200
 args.d_hid              = 256
@@ -67,5 +67,6 @@ PATH    = {
     ## Paths associated with Data Reading
     'dataset_para'  : "backup/[SPLIT]/data_[SHARD].csv",
     'vocab_PGD'     : "backup/vocab_PGD.txt",
-    'saved_model'   : "backup/model.pt"
+    'saved_model'   : "backup/model.pt",
+    'saved_chkpoint': "backup/chkpoint.pth.tar"
 }

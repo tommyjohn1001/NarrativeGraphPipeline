@@ -124,6 +124,8 @@ class TrainDataset(Dataset):
             answer1     = answers[0].split(' ')
             answer2     = answers[1].split(' ')
 
+            # self.ans1_text.append(answer1)
+
             answer1_mask    = torch.Tensor([1]*len(answer1) +\
                               [0]*(args.seq_len_ans - len(answer1)))
             answer2_mask    = torch.Tensor([1]*len(answer2) +\
@@ -172,6 +174,7 @@ class TrainDataset(Dataset):
             'ans2_mask'     : self.ans2_mask[idx],
             'ans1_tok_idx'  : self.ans1_tok_idx[idx],
             'ans2_tok_idx'  : self.ans2_tok_idx[idx]
+            # 'ans1_text'     : self.ans1_text[idx]
         }
 
 

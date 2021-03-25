@@ -83,12 +83,35 @@ class Trainer():
         Returns:
             model even loaded or not
         """
-
-        if check_file_existence(PATH['saved_model']):
-            logging.info("=> Saved model instance existed. Load it.")
-            model.load_state_dict(torch.load(PATH['saved_model']), strict=False)
+        model.load_state_dict(torch.load(PATH['saved_model']), strict=False)
 
         return model
+
+    def save_checkpoint(self, model, optimizer, epoch):
+        """Save training checkpoint.
+
+        Args:
+            model (torch.nn.Module): model to be saved
+            optimizer (torch.nn.optim): optimizer
+            epoch (int): no. trained epochs
+            loss (tensor): loss
+        """
+        torch.save(
+            {
+               'epoch'      : epoch,
+               'model_state': model.state_dict(),
+               'optim_state': optimizer.state_dict()
+            }, PATH['saved_chkpoint'])
+
+    def load_checkpoint(self):
+        """Load state of model and optimizer for continuing training.
+
+        Returns:
+            dict: dict containing necessary info for training
+        """
+        if check_file_existence(PATH['saved_chkpoint']):
+            logging.info("=> Saved checkpoint instance existed. Load it.")
+        return torch.load(PATH['saved_chkpoint'])
 
     def train(self, model, dataset_train, criterion, optimizer):
         n_samples       = len(dataset_train)
@@ -174,12 +197,24 @@ class Trainer():
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
         criterion   = torch_nn.CrossEntropyLoss()
 
+        start_epoch = 0
+
+        # Check if previous checkpoint available
+        if check_file_existence(PATH['saved_model']):
+            logging.info("=> Saved model instance existed. Load it.")
+
+            states  = self.load_checkpoint()
+
+            model.load_state_dict(states['model_state'])
+            optimizer.load_state_dict(states['optim_state'])
+            start_epoch = states['epoch']
+
 
         ###############################
         # Start training
         ###############################
         best_loss_test  = 10e10
-        for nth_epoch in range(args.n_epochs):
+        for nth_epoch in range(start_epoch, args.n_epochs):
             logging.info(f"= Epoch {nth_epoch}")
 
             loss_train  = self.train(model, dataset_train, criterion, optimizer)
@@ -196,6 +231,7 @@ class Trainer():
                 self.save_model(model)
 
             logging.info(f"= Epoch {nth_epoch} finishes: loss_train {loss_train:.5f} | loss_test {loss_test:.5f}")
+            self.save_checkpoint(model, optimizer, nth_epoch)
 
 
     def get_batch_scores(self, pred, ans_tok_idx):

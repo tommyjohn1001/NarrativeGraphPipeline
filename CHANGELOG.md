@@ -2,6 +2,9 @@
 
 ### This file contains changes and modifications during developing.
 
+## Mar 25, 2021, 11:18 AM
+- Finish remaining modules for training, testing and evaluating.
+
 ## Mar 19, 2021, 18:05 PM
 - Finish implementing *PointerGeneratorDecoder*
 - Add question tokens to global vocab of *PointerGeneratorDecoder*
