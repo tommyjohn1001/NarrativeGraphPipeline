@@ -4,6 +4,7 @@ import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 
+from modules.utils import transpose
 from configs import args
 
 class FineGrain(torch_nn.Module):
@@ -40,7 +41,6 @@ class FineGrain(torch_nn.Module):
         # Operate CoAttention question
         # with each paragraph
         #########################
-        seq_len_para    = args.seq_len_para
         seq_len_ques    = args.seq_len_ques
         batch           = args.batch
         n_paras         = args.n_paras
@@ -75,17 +75,17 @@ class FineGrain(torch_nn.Module):
             ###################
 
             # Affinity matrix
-            A   = torch.bmm(E_s, torch.reshape(E_q, (batch, -1, seq_len_ques)))
+            A   = torch.bmm(E_s, transpose(E_q))
             # A: [batch, seq_len_para, seq_len_ques]
 
             # S_s  = torch.matmul(torch_f.softmax(A, dim=1), E_q)
-            S_q = torch.bmm(torch_f.softmax(torch.reshape(A, (batch, seq_len_ques, seq_len_para)), dim=1), E_s)
+            S_q = torch.bmm(torch_f.softmax(transpose(A), dim=1), E_s)
             # S_q: [batch, seq_len_ques, d_hid]
 
 
             X   = torch.bmm(torch_f.softmax(A, dim=1), S_q)
             C_s = self.biGRU_CoAttn(X)[0]
-            C_s = torch.reshape(C_s, (batch, seq_len_para, -1))
+            C_s = transpose(C_s)
 
             C_s = torch.unsqueeze(C_s, 1)
             # C_s: [batch, 1, seq_len_ques, d_hid]
