@@ -99,12 +99,12 @@ class PointerGeneratorDecoder(torch_nn.Module):
         # ans_: [batch, max_len_ans, d_hid_PGD]
 
         # CLS is used to initialize LSTM
-        cls_tok = torch.zeros((batch, 1, self.d_hid_PGD))
+        cls_tok = torch.zeros((batch, 1, self.d_hid_PGD)).to(args.device)
 
-        h_t     = torch.zeros((batch, self.n_layers, self.d_hid_PGD))
-        c_t     = torch.zeros((batch, self.n_layers, self.d_hid_PGD))
+        h_t     = torch.zeros((batch, self.n_layers, self.d_hid_PGD)).to(args.device)
+        c_t     = torch.zeros((batch, self.n_layers, self.d_hid_PGD)).to(args.device)
 
-        pred    = torch.zeros((batch, self.max_len_ans, self.d_vocab + self.seq_len_cntx))
+        pred    = torch.zeros((batch, self.max_len_ans, self.d_vocab + self.seq_len_cntx)).to(args.device)
         # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
 
         #################################
@@ -154,17 +154,17 @@ class PointerGeneratorDecoder(torch_nn.Module):
             # Predict word
             ###################
             # Pad a_t and v_t to d_vocab + seq_len_cntx
-            padding = torch.zeros((batch, self.d_vocab))
+            padding = torch.zeros((batch, self.d_vocab)).to(args.device)
             a_t     = torch.cat((a_t.squeeze(-1), padding), 1).unsqueeze(-1)
             # a_t: [batch, d_vocab + seq_len_cntx, 1]
 
-            padding = torch.zeros((batch, self.seq_len_cntx))
+            padding = torch.zeros((batch, self.seq_len_cntx)).to(args.device)
             v_t     = torch.cat((v_t, padding), 1).unsqueeze(-1)
             # v_t: [batch, d_vocab + seq_len_cntx, 1]
 
             # Multiply a_t, v_t with p_t and 1 - p_t
             a_t     = torch.bmm(a_t, p_t.unsqueeze(-1)).squeeze(-1)
-            v_t     = torch.bmm(v_t, (torch.ones((batch)) - p_t).unsqueeze(-1)).squeeze(-1)
+            v_t     = torch.bmm(v_t, (torch.ones((batch)).to(args.device) - p_t).unsqueeze(-1)).squeeze(-1)
             # a_t, v_t: [batch, d_vocab + seq_len_cntx]
 
             w_t     = a_t + v_t

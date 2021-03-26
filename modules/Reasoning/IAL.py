@@ -48,7 +48,7 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         G   = self.linearReason(tmp)
         # G: [batch, seq_len_context, d_hid]
 
-        result  = torch.zeros((batch, seq_len_context, seq_len_context))
+        result  = torch.zeros((batch, seq_len_context, seq_len_context)).to(args.device)
 
         for b in range(batch):
             for i in range(seq_len_context):

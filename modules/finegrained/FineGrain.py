@@ -45,7 +45,7 @@ class FineGrain(torch_nn.Module):
         batch           = args.batch
         n_paras         = args.n_paras
 
-        question    = torch.zeros((batch, seq_len_ques, self.d_hid))
+        question    = torch.zeros((batch, seq_len_ques, self.d_hid)).to(args.device)
         paragraphs  = None
 
         for ith in range(n_paras):

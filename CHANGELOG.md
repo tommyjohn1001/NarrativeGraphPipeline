@@ -2,21 +2,25 @@
 
 ### This file contains changes and modifications during developing.
 
-## Mar 25, 2021, 11:18 AM
+## Mar 26, 2021, 20:35
+- Reimplement *Dataset* module
+- Finish test a training batch
+
+## Mar 25, 2021, 11:18
 - Finish remaining modules for training, testing and evaluating.
 
-## Mar 19, 2021, 18:05 PM
+## Mar 19, 2021, 18:05
 - Finish implementing *PointerGeneratorDecoder*
 - Add question tokens to global vocab of *PointerGeneratorDecoder*
 
-## Mar 16, 2021, 12:54 PM
+## Mar 16, 2021, 12:54
 - Finish module *FineGrain*, *CustomDataset*, *IAL*
 
-## Mar1, 2021, 16:50 PM
+## Mar1, 2021, 16:50
 - Finish *FineGrain* module with single question and paragraph as input
 - Modify *config* file
 
-## Mar 8, 2021, 12:00 PM
+## Mar 8, 2021, 12:00
 - Abandon idea of using trained Bert-based Paras Selector and back to idea proposed in paper *Simple and Effective* - using TfIdf
 
 ## Mar 2, 2021

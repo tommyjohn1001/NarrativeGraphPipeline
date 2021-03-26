@@ -1,7 +1,6 @@
 '''This file contain modules for loading data and training procedure. Other component layers
 are in other directories.'''
 from collections import defaultdict
-from multiprocessing import Pool
 import glob, ast, gc
 
 from torch.utils.data import Dataset
@@ -11,9 +10,11 @@ from datasets import load_dataset
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 import pandas as pd
+import numpy as np
 import spacy
 
 from modules.data_reading.data_reading import clean_end, clean_text
+from modules.utils import ParallelHelper
 from configs import logging, args, PATH
 
 
@@ -32,30 +33,6 @@ special_toks = set([PAD, CLS, UNK, SEP])
 
 def pad(l, max_len):
     return l + [PAD]*(max_len - len(l))
-
-def f_processing(contexts:list):
-    """ Convert list of contexts to matrix """
-
-    # Remove HTML tag
-    context = BeautifulSoup(' '.join(contexts), 'html.parser').get_text()
-    # Tokenize context
-    context = [tok.text for tok in nlp(context)]
-
-    # Pad context
-    context = pad(context, SEQ_LEN_CONTEXT)
-    # Embed context by GloVe
-    context = glove_embd.get_vecs_by_tokens(context)
-
-    # context: [SEQ_LEN_CONTEXT = 1600, d_embd = 200]
-    return context
-
-def f_reset(paras):
-    para_En, para_Hn, n_exchange = paras
-
-    context = para_En[n_exchange:] + para_Hn[:n_exchange]
-    context = f_processing(context)
-
-    return context
 
 class Vocab:
     def __init__(self, path_vocab) -> None:
@@ -78,84 +55,24 @@ class Vocab:
     def __len__(self):
         return len(self.stoi)
 
-
-class TrainDataset(Dataset):
+class CustomDataset(Dataset):
     def __init__(self, path_csv_dir, path_vocab):
-        # Read CSV data file
-        file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
-
-        dfs = []
-        for filename in file_names:
-            df = pd.read_csv(filename, index_col=None, header=0)
-            dfs.append(df)
-
-        df = pd.concat(dfs, axis=0, ignore_index=True)
+        # Search for available data file within directory
+        self.file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
 
         # Read vocab
         self.vocab  = Vocab(path_vocab)
 
-
-        self.En     = [ast.literal_eval(entry) for entry in df['En']]
-        self.Hn     = [ast.literal_eval(entry) for entry in df['Hn']]
-
-        self.ques           = []
-        self.ans1           = []
-        self.ans2           = []
-        self.ans1_mask      = []
-        self.ans2_mask      = []
-        self.ans1_tok_idx   = []
-        self.ans2_tok_idx   = []
+        self.ques           = None
+        self.ans1           = None
+        self.ans2           = None
+        self.ans1_mask      = None
+        self.ans2_mask      = None
+        self.ans1_tok_idx   = None
+        self.ans2_tok_idx   = None
         self.contx          = None
 
         self.n_exchange     = 0
-
-        ######################
-        # Fill self.ques, self.ans1,  self.ans2,
-        # answers' mask and index
-        ######################
-        for entry in df.itertuples():
-            # Process question: tokenize, pad and question mask
-            question    = pad(entry.question.split(' '), args.seq_len_ques)
-            question    = glove_embd.get_vecs_by_tokens(question)
-
-
-            # Process answers including mask token id and embedding form
-            answers     = ast.literal_eval(entry.answers)
-            answer1     = answers[0].split(' ')
-            answer2     = answers[1].split(' ')
-
-            # self.ans1_text.append(answer1)
-
-            answer1_mask    = torch.Tensor([1]*len(answer1) +\
-                              [0]*(args.seq_len_ans - len(answer1)))
-            answer2_mask    = torch.Tensor([1]*len(answer2) +\
-                              [0]*(args.seq_len_ans - len(answer2)))
-
-            answer1         = pad(answer1, args.seq_len_ans)
-            answer2         = pad(answer2, args.seq_len_ans)
-
-            answer1_tok_idx = torch.LongTensor([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
-                               for w in answer1])
-            answer2_tok_idx = torch.LongTensor([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
-                               for w in answer2])
-
-            answer1 = glove_embd.get_vecs_by_tokens(answer1)
-            answer2 = glove_embd.get_vecs_by_tokens(answer2)
-
-            # Append to self.question, self.ans1 and self.ans2
-            self.ques.append(question)
-            self.ans1.append(answer1)
-            self.ans2.append(answer2)
-            self.ans1_mask.append(answer1_mask)
-            self.ans2_mask.append(answer2_mask)
-            self.ans1_tok_idx.append(answer1_tok_idx)
-            self.ans2_tok_idx.append(answer2_tok_idx)
-
-
-        ######################
-        # Initialize self.contx
-        ######################
-        self.reset_context()
 
 
     def __len__(self):
@@ -177,44 +94,76 @@ class TrainDataset(Dataset):
             # 'ans1_text'     : self.ans1_text[idx]
         }
 
+    def f_process_file(self, entries, queue):
+        for entry in entries.itertuples():
 
-    def reset_context(self):
-        self.contx = None
-        gc.collect()
-
-        with Pool(args.num_proc) as pool:
-            self.contx   = list(tqdm(pool.imap(f_processing, self.En),
-                                        desc="Reset train", total=len(self.ques)))
-        self.n_exchange = 1
-
-
-    def switch_answerability(self):
-        self.contx = []
-        gc.collect()
-
-        with Pool(args.num_proc) as pool:
-            self.contx   = list(tqdm(pool.imap(f_reset, zip(self.En, self.Hn,
-                                                  [self.n_exchange for _ in range(len(self.ques))])),
-                                        desc="Switch Easy-Hard", total=len(self.ques)))
-        self.n_exchange += 1
+            ###########################
+            # Process question
+            ###########################
+            question    = pad(entry.question.split(' '), args.seq_len_ques)
+            question    = glove_embd.get_vecs_by_tokens(question).numpy()
 
 
-class EvalDataset(Dataset):
-    def __init__(self, path_csv_dir, path_vocab) -> None:
-        super().__init__()
+            ###########################
+            # Process answers including mask token id and embedding form
+            ###########################
+            answers     = ast.literal_eval(entry.answers)
+            answer1     = answers[0].split(' ')
+            answer2     = answers[1].split(' ')
 
-        # Read CSV datafile
-        file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
 
-        dfs = []
-        for filename in file_names:
-            df = pd.read_csv(filename, index_col=None, header=0)
-            dfs.append(df)
+            answer1_mask    = np.array([1]*len(answer1) +\
+                                [0]*(args.seq_len_ans - len(answer1)), dtype=np.float)
+            answer2_mask    = np.array([1]*len(answer2) +\
+                                [0]*(args.seq_len_ans - len(answer2)), dtype=np.float)
 
-        df = pd.concat(dfs, axis=0, ignore_index=True)
+            answer1         = pad(answer1, args.seq_len_ans)
+            answer2         = pad(answer2, args.seq_len_ans)
 
-        # Read vocab
-        self.vocab  = Vocab(path_vocab)
+            answer1_tok_idx = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
+                                for w in answer1], dtype=np.long)
+            answer2_tok_idx = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
+                                for w in answer2], dtype=np.long)
+
+            answer1 = glove_embd.get_vecs_by_tokens(answer1).numpy()
+            answer2 = glove_embd.get_vecs_by_tokens(answer2).numpy()
+
+
+            ###########################
+            # Process context
+            ###########################
+            En      = ast.literal_eval(entry.En)
+            Hn      = ast.literal_eval(entry.Hn)
+
+            context = En[self.n_exchange:] + Hn[:self.n_exchange]
+
+            # Process context
+
+            # Remove HTML tag
+            context = BeautifulSoup(' '.join(context), 'html.parser').get_text()
+            # Tokenize context
+            context = [tok.text for tok in nlp(context)]
+
+            # Pad context
+            context = pad(context, SEQ_LEN_CONTEXT)
+            # Embed context by GloVe
+            context = glove_embd.get_vecs_by_tokens(context).numpy()
+
+            # context: [SEQ_LEN_CONTEXT = 1600, d_embd = 200]
+
+            queue.put({
+                'ques'          : question,
+                'ans1'          : answer1,
+                'ans2'          : answer2,
+                'ans1_mask'     : answer1_mask,
+                'ans2_mask'     : answer2_mask,
+                'ans1_tok_idx'  : answer1_tok_idx,
+                'ans2_tok_idx'  : answer2_tok_idx,
+                'contx'         : context
+            })
+
+    def read_shard(self, path_file):
+        df  = pd.read_csv(path_file, index_col=None, header=0)
 
         self.ques           = []
         self.ans1           = []
@@ -225,67 +174,31 @@ class EvalDataset(Dataset):
         self.ans2_tok_idx   = []
         self.contx          = []
 
+        gc.collect()
 
-        # Fill self.ques, self.ans1 and self.ans2
-        for entry in tqdm(df.itertuples(), desc="Load valid dataset", total=len(df)):
-            # Process question: tokenize, pad and question mask
-            question        = pad(entry.question.split(' '), args.seq_len_ques)
-            question        = glove_embd.get_vecs_by_tokens(question)
+        ######################
+        # Fill self.ques, self.ans1,  self.ans2,
+        # answers' mask and index
+        ######################
+        entries = ParallelHelper(self.f_process_file, df, num_proc=args.num_proc,
+                                 data_allocation=lambda dat, l, h: dat.iloc[l:h]).launch()
+        # with Pool(args.num_proc) as pool:
+        #     entries = list(tqdm(pool.imap(f_process_file, zip(df.to_dict(orient='records'), repeat(self.vocab), repeat(self.n_exchange))),
+                                # desc="", total=len(df)))
 
-            # Process answers including mask token id and embedding form
-            answers     = ast.literal_eval(entry.answers)
-            answer1     = answers[0].split(' ')
-            answer2     = answers[1].split(' ')
+        for entry in entries:
+            self.ques.append(entry['ques'])
+            self.ans1.append(entry['ans1'])
+            self.ans2.append(entry['ans2'])
+            self.ans1_mask.append(entry['ans1_mask'])
+            self.ans2_mask.append(entry['ans2_mask'])
+            self.ans1_tok_idx.append(entry['ans1_tok_idx'])
+            self.ans2_tok_idx.append(entry['ans2_tok_idx'])
+            self.contx.append(entry['contx'])
 
-            answer1_mask    = torch.Tensor([1]*len(answer1) +\
-                              [0]*(args.seq_len_ans - len(answer1)))
-            answer2_mask    = torch.Tensor([1]*len(answer2) +\
-                              [0]*(args.seq_len_ans - len(answer2)))
+    def switch_answerability(self):
+        self.n_exchange += 1
 
-            answer1         = pad(answer1, args.seq_len_ans)
-            answer2         = pad(answer2, args.seq_len_ans)
-
-            answer1_tok_idx = torch.LongTensor([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
-                               for w in answer1])
-            answer2_tok_idx = torch.LongTensor([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
-                               for w in answer2])
-
-            answer1 = glove_embd.get_vecs_by_tokens(answer1)
-            answer2 = glove_embd.get_vecs_by_tokens(answer2)
-
-
-            # Append to self.question, self.ans1, self.ans2 and self.contx
-            self.ques.append(question)
-            self.ans1.append(answer1)
-            self.ans2.append(answer2)
-            self.ans1_mask.append(answer1_mask)
-            self.ans2_mask.append(answer2_mask)
-            self.ans1_tok_idx.append(answer1_tok_idx)
-            self.ans2_tok_idx.append(answer2_tok_idx)
-
-
-        # Process context
-        Hn  = [ast.literal_eval(entry.Hn) for entry in df.itertuples()]
-        with Pool(args.num_proc) as pool:
-            self.contx  = list(tqdm(pool.imap(f_processing, Hn),
-                                desc="Load contexts of valid dataset", total=len(self.ques)))
-
-
-    def __len__(self):
-        return len(self.ques)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        return {
-            'ques'      : self.ques[idx],
-            'contx'     : self.contx[idx],
-            'ans1'      : self.ans1[idx],
-            'ans2'      : self.ans2[idx],
-            'ans1_mask' : self.ans1_mask[idx],
-            'ans2_mask' : self.ans2_mask[idx]
-        }
 
 
 def build_vocab_PGD():

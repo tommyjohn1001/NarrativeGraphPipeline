@@ -7,7 +7,7 @@ import torch
 from transformers import AdamW
 
 
-from modules.narrativepipeline.utils_origin import TrainDataset, EvalDataset, build_vocab_PGD, Vocab
+from modules.narrativepipeline.utils_origin import CustomDataset, build_vocab_PGD, Vocab
 from modules.pg_decoder.PointerGeneratorDecoder import PointerGeneratorDecoder
 from modules.utils import EmbeddingLayer, check_file_existence, transpose, get_scores
 from modules.Reasoning.IAL import IntrospectiveAlignmentLayer
@@ -113,58 +113,27 @@ class Trainer():
             logging.info("=> Saved checkpoint instance existed. Load it.")
         return torch.load(PATH['saved_chkpoint'])
 
-    def train(self, model, dataset_train, criterion, optimizer):
-        n_samples       = len(dataset_train)
+    def train(self, model, dataset_train:CustomDataset, criterion, optimizer):
+        loss_train  = 0
+        nth_batch   = 0
 
         model.train()
 
-        iterator_train  = DataLoader(dataset_train, batch_size=args.batch, shuffle=True)
-        nth_batch   = 0
-        loss_train  = 0
-        for batch in iterator_train:
-            ques        = batch['ques']
-            contx       = batch['contx']
-            # NOTE: Due to limitation, this only uses answer1 only. Later, both answers must be made used of.
-            ans         = batch['ans1']
-            ans_mask    = batch['ans1_mask']
-            ans_tok_idx = batch['ans1_tok_idx']
+        for train_file in dataset_train.file_names:
+            logging.info(f"Train with file: {train_file}")
 
-            optimizer.zero_grad()
+            dataset_train.read_shard(train_file)
+            iterator_train  = DataLoader(dataset_train, batch_size=args.batch, shuffle=True)
 
-            pred        = model(ques, contx, ans, ans_mask)
-            # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
-            pred        = transpose(pred)
-            # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
-            loss        = criterion(pred, ans_tok_idx)
-
-            loss.backward()
-            torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
-            optimizer.step()
-
-            loss_train += loss
-
-            logging.info(f"  train: batch {nth_batch} | loss: {loss:5f}")
-            nth_batch += 1
-
-        return loss_train / n_samples
-
-
-    def test(self, model, dataset_test, criterion):
-        n_samples       = len(dataset_test)
-
-        model.eval()
-
-        iterator_test   = DataLoader(dataset_test, batch_size=args.batch)
-        nth_batch       = 0
-        loss_test       = 0
-        with torch.no_grad():
-            for batch in iterator_test:
-                ques        = batch['ques']
-                contx       = batch['contx']
+            for batch in iterator_train:
+                ques        = batch['ques'].to(args.device)
+                contx       = batch['contx'].to(args.device)
                 # NOTE: Due to limitation, this only uses answer1 only. Later, both answers must be made used of.
-                ans         = batch['ans1']
-                ans_mask    = batch['ans1_mask']
-                ans_tok_idx = batch['ans1_tok_idx']
+                ans         = batch['ans1'].to(args.device)
+                ans_mask    = batch['ans1_mask'].to(args.device)
+                ans_tok_idx = batch['ans1_tok_idx'].to(args.device)
+
+                optimizer.zero_grad()
 
                 pred        = model(ques, contx, ans, ans_mask)
                 # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
@@ -172,21 +141,60 @@ class Trainer():
                 # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
                 loss        = criterion(pred, ans_tok_idx)
 
-                loss_test += loss
+                loss.backward()
+                torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+                optimizer.step()
 
-                logging.info(f"  test: batch {nth_batch} | loss: {loss:5f}")
+                loss_train += loss
+
+                logging.info(f"  train: batch {nth_batch} | loss: {loss:5f}")
                 nth_batch += 1
 
-        return loss_test / n_samples
+        return loss_train / nth_batch
+
+
+    def test(self, model, dataset_test, criterion):
+        loss_test   = 0
+        nth_batch   = 0
+
+        model.eval()
+
+        with torch.no_grad():
+            for eval_file in dataset_test.file_names:
+                logging.info(f"Eval with file: {eval_file}")
+
+                dataset_test.read_shard(eval_file)
+                iterator_test  = DataLoader(dataset_test, batch_size=args.batch, shuffle=True)
+
+                for batch in iterator_test:
+                    ques        = batch['ques'].to(args.device)
+                    contx       = batch['contx'].to(args.device)
+                    # NOTE: Due to limitation, this only uses answer1 only. Later, both answers must be made used of.
+                    ans         = batch['ans1'].to(args.device)
+                    ans_mask    = batch['ans1_mask'].to(args.device)
+                    ans_tok_idx = batch['ans1_tok_idx'].to(args.device)
+
+                    pred        = model(ques, contx, ans, ans_mask)
+                    # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
+                    pred        = transpose(pred)
+                    # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
+                    loss        = criterion(pred, ans_tok_idx)
+
+                    loss_test += loss
+
+                    logging.info(f"  test: batch {nth_batch} | loss: {loss:5f}")
+                    nth_batch += 1
+
+        return loss_test / nth_batch
 
 
     def trigger_train(self):
         ###############################
         # Load data
         ###############################
-        dataset_train   = TrainDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "train"),
+        dataset_train   = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "train"),
                                        PATH['vocab_PGD'])
-        dataset_test    = EvalDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "test"),
+        dataset_test    = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "test"),
                                       PATH['vocab_PGD'])
 
 
@@ -222,7 +230,7 @@ class Trainer():
 
             if loss_test > best_loss_test:
                 if dataset_train.n_exchange < args.n_paras:
-                    dataset_train.switch_answerability()                   
+                    dataset_train.switch_answerability()
                 else:
                     # NOTE: Later, at this position switch_understandability() must be called
                     break
@@ -243,7 +251,6 @@ class Trainer():
         """
         # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
         # ans_tok_idx: [batch, max_len_ans]
-        batch   = pred.shape[0]
 
         pred_   = torch.argmax(torch_f.log_softmax(pred, 1), 1)
         # pred_: [batch, max_len_ans]
