@@ -58,13 +58,15 @@ class Trainer():
     def __init__(self):
         super().__init__()
 
-        self.vocab  = Vocab(PATH['vocab_PGD'])
         ################################
         # Build vocab for PointerGeneratorDecoder
         ################################
         logging.info("Preparation: Build vocab for PGD")
         if not check_file_existence(PATH['vocab_PGD']):
             build_vocab_PGD()
+
+
+        self.vocab  = Vocab(PATH['vocab_PGD'])
 
     def save_model(self, model):
         """
@@ -142,10 +144,10 @@ class Trainer():
                 loss        = criterion(pred, ans_tok_idx)
 
                 loss.backward()
-                torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+                # torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
                 optimizer.step()
 
-                loss_train += loss
+                loss_train += loss.detach().item()
 
                 logging.info(f"  train: batch {nth_batch} | loss: {loss:5f}")
                 nth_batch += 1
@@ -180,7 +182,7 @@ class Trainer():
                     # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
                     loss        = criterion(pred, ans_tok_idx)
 
-                    loss_test += loss
+                    loss_test += loss.detach().item()
 
                     logging.info(f"  test: batch {nth_batch} | loss: {loss:5f}")
                     nth_batch += 1
@@ -276,7 +278,7 @@ class Trainer():
         ###############################
         # Load data
         ###############################
-        dataset_valid   = EvalDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "validation"),
+        dataset_valid   = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "validation"),
                                       PATH['vocab_PGD'])
 
         ###############################
@@ -315,7 +317,7 @@ class Trainer():
                 loss        = criterion(pred, ans_tok_idx)
 
                 # Calculate loss
-                loss_test += loss
+                loss_test += loss.detach().item()
 
                 # Get batch score
                 bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans_tok_idx)

@@ -48,14 +48,24 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         G   = self.linearReason(tmp)
         # G: [batch, seq_len_context, d_hid]
 
-        result  = torch.zeros((batch, seq_len_context, seq_len_context)).to(args.device)
+        # result  = torch.zeros((batch, seq_len_context, seq_len_context)).to(args.device)
 
+        # for b in range(batch):
+        #     for i in range(seq_len_context):
+        #         for j in range(seq_len_context):
+        #             if abs(i - j) <= Block:
+        #                 result[b, i, j] = torch.matmul(G[b, i, :], G[b, j, :])
+        # G = result
+
+        G   = torch.bmm(G, transpose(G))
+        mask= torch.zeros((batch, seq_len_context, seq_len_context))
         for b in range(batch):
             for i in range(seq_len_context):
                 for j in range(seq_len_context):
                     if abs(i - j) <= Block:
-                        result[b, i, j] = torch.matmul(G[b, i, :], G[b, j, :])
-        G = result
+                        mask[b,i,j] = 1
+        G   = G * mask.to(args.device)
+
 
         # Local BLock-based Self-Attention
         B = torch.bmm(torch_f.softmax(G, dim=1), tmp)

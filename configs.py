@@ -43,13 +43,13 @@ args.multi_gpus = torch.cuda.device_count() > 0
 
 args.seq_len_ques       = 40
 args.seq_len_para       = 40
-args.seq_len_ans        = 20
+args.seq_len_ans        = 30
 args.n_paras            = 40
 args.d_embd             = 200
 args.d_hid              = 256
-args.max_len_ans        = 12
+args.max_len_ans        = 30
 args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
-args.d_vocab            = 131059    # Vocab size
+args.d_vocab            = 27175     # Vocab size
 args.dropout            = 0.2
 args.n_layers           = 5
 

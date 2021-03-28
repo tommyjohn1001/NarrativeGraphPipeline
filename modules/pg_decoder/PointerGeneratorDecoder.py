@@ -129,8 +129,8 @@ class PointerGeneratorDecoder(torch_nn.Module):
             else:
                 tmp = torch.cat((y_t, ans_[:,t-1,:].unsqueeze(1)), dim=2)
             # tmp: [batch, 1, d_hid_PGD * 2]
-            _, (h_t, c_t)   = self.lstm(tmp, (h_t.transpose(0, 1),
-                                              c_t.transpose(0, 1)))
+            _, (h_t, c_t)   = self.lstm(tmp.contiguous(), (h_t.transpose(0, 1).contiguous(),
+                                              c_t.transpose(0, 1).contiguous()))
             h_t = h_t.transpose(0, 1)
             c_t = c_t.transpose(0, 1)
             # h_t: [batch, n_layers, d_hid_PGD]
@@ -146,9 +146,9 @@ class PointerGeneratorDecoder(torch_nn.Module):
 
             h_t_    = self.linear_ph2(self.linear_ph1(h_t).squeeze(-1))
             c_t_    = self.linear_pc2(self.linear_pc1(c_t).squeeze(-1))
-            # h_t_, c_t_, y_t: [batch]
-            p_t     = torch.sigmoid(h_t_ + c_t_ + y_t)
-            # p_t: [batch]
+            # h_t_, c_t_, y_t: [batch, 1]
+            p_t     = torch.sigmoid(h_t_ + c_t_ + y_t).unsqueeze(-1)
+            # p_t: [batch, 1, 1]
 
             ###################
             # Predict word
@@ -163,8 +163,9 @@ class PointerGeneratorDecoder(torch_nn.Module):
             # v_t: [batch, d_vocab + seq_len_cntx, 1]
 
             # Multiply a_t, v_t with p_t and 1 - p_t
-            a_t     = torch.bmm(a_t, p_t.unsqueeze(-1)).squeeze(-1)
-            v_t     = torch.bmm(v_t, (torch.ones((batch)).to(args.device) - p_t).unsqueeze(-1)).squeeze(-1)
+            a_t     = torch.bmm(a_t, p_t).squeeze(-1)
+
+            v_t     = torch.bmm(v_t, (torch.ones((batch, 1, 1)).to(args.device) - p_t)).squeeze(-1)
             # a_t, v_t: [batch, d_vocab + seq_len_cntx]
 
             w_t     = a_t + v_t

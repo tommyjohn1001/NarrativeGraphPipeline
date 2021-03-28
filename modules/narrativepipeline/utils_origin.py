@@ -261,8 +261,12 @@ def build_vocab_PGD():
             for tok in entry['answers'][0]['tokens'] + entry['answers'][1]['tokens']:
                 answer_toks.add(tok.lower())
 
-    # Filter words
-    words = set(w for w, occurence in word_count.items() if occurence >= args.min_count_PGD)
+
+    # Sort word_count dict and filter top 1000 words
+    words = sorted(word_count.items(), key=lambda item: item[1], reverse=True)
+    words = set(word for word, occurence in words[:1000] if occurence >= args.min_count_PGD)
+
+    # words = set(w for w, occurence in word_count.items() if occurence >= args.min_count_PGD)
 
     words = words.union(answer_toks)
 

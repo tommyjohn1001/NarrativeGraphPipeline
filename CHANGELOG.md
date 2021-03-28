@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## Mar 28, 2021, 22:17
+- Reduce vocab size to 10 times smaller: Use top 1000 most occured words from context and words from answer
+- Change in accumulating loss (detaching it before accumulating)
+- Contiguous and change dimensions at some points in *PGD*
+- Change the way of calculating *Equation 2*, hence reduce time and memory prohibitively spent during training
+
 ## Mar 26, 2021, 20:35
 - Reimplement *Dataset* module
 - Finish test a training batch
