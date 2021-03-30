@@ -175,7 +175,7 @@ class PointerGeneratorDecoder(torch_nn.Module):
 
         ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab + self.seq_len_cntx)
         # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
-        pred    = torch.mul(pred, ans_mask)
+        pred    = pred * ans_mask
 
         # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
         return pred

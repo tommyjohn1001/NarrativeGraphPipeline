@@ -2,6 +2,10 @@
 
 ### This file contains changes and modifications during developing.
 
+## Mar 30, 2021, 16:35
+- Change minor thing in *IAL* to speed up training
+- Fix some problems in *trigger_inference*
+
 ## Mar 28, 2021, 22:17
 - Reduce vocab size to 10 times smaller: Use top 1000 most occured words from context and words from answer
 - Change in accumulating loss (detaching it before accumulating)

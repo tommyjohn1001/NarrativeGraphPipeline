@@ -11,7 +11,8 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
     def __init__(self, d_hid=args.d_hid, d_emb=200):
         super().__init__()
 
-        self.d_hid  = d_hid
+        self.d_hid          = d_hid
+
 
 
         self.biLSTM_emb     = torch_nn.LSTM(d_emb, d_hid//2, num_layers=5,
@@ -24,11 +25,18 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         self.biLSTM_attn    = torch_nn.LSTM(8*d_hid, d_hid, num_layers=5,
                                            batch_first=True, bidirectional=True)
 
+        batch           = args.batch
+        seq_len_contx   = args.seq_len_para * args.n_paras
+        self.mask       = torch.zeros((1, seq_len_contx, seq_len_contx))
+        for i in range(seq_len_contx):
+            for j in range(seq_len_contx):
+                if abs(i - j) <= Block:
+                    self.mask[0,i,j] = 1
+        self.mask       = self.mask.repeat((batch, 1, 1)).to(args.device)
+
     def forward(self, H_q, H_c):
         # H_q   : [batch, seq_len_ques, d_hid]
         # H_c   : [batch, seq_len_contex, d_hid]
-
-        batch, seq_len_context, _ = H_c.shape
 
 
         # Introspective Alignment
@@ -58,13 +66,8 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         # G = result
 
         G   = torch.bmm(G, transpose(G))
-        mask= torch.zeros((batch, seq_len_context, seq_len_context))
-        for b in range(batch):
-            for i in range(seq_len_context):
-                for j in range(seq_len_context):
-                    if abs(i - j) <= Block:
-                        mask[b,i,j] = 1
-        G   = G * mask.to(args.device)
+
+        G   = G * self.mask[:G.shape[0]]
 
 
         # Local BLock-based Self-Attention

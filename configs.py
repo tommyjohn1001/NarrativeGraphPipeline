@@ -20,7 +20,7 @@ parser.add_argument("--n_shards", type=int, help="Number of chunks to split from
                     default=8)
 parser.add_argument("--device", type=str, default="default", choices=["default", "cpu", "cuda"],
                     help="Select device to run")
-parser.add_argument("--lr", type=float, default=5e-6, help="Learning rate")
+parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--w_decay", type=float, default=0, help="Weight decay")
 
 # args = parser.parse_args()
@@ -43,11 +43,11 @@ args.multi_gpus = torch.cuda.device_count() > 0
 
 args.seq_len_ques       = 40
 args.seq_len_para       = 40
-args.seq_len_ans        = 30
+args.seq_len_ans        = 40
 args.n_paras            = 40
 args.d_embd             = 200
 args.d_hid              = 256
-args.max_len_ans        = 30
+args.max_len_ans        = 40
 args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
 args.d_vocab            = 27175     # Vocab size
 args.dropout            = 0.2

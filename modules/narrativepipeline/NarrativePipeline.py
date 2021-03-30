@@ -144,7 +144,7 @@ class Trainer():
                 loss        = criterion(pred, ans_tok_idx)
 
                 loss.backward()
-                # torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+                torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
                 optimizer.step()
 
                 loss_train += loss.detach().item()
@@ -286,49 +286,54 @@ class Trainer():
         ###############################
         model       = NarrativePipeline().to(args.device)
         criterion   = torch_nn.CrossEntropyLoss()
-        model = model.to(args.device)
+        model       = model.to(args.device)
 
         model       = self.load_model(model)
 
         ###############################
         # Start infering
         ###############################
-        n_samples       = len(dataset_valid)
+        nth_batch, n_samples            = 0, 0
+        loss_test                       = 0
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
 
         model.eval()
-        iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch)
 
         with torch.no_grad():
-            nth_batch   = 0
-            loss_test   = 0
-            for batch in iterator_valid:
-                ques        = batch['ques']
-                contx       = batch['contx']
-                # NOTE: Due to limitation, this only uses answer1 only. Later, both answers must be made used of.
-                ans         = batch['ans1']
-                ans_mask    = batch['ans1_mask']
-                ans_tok_idx = batch['ans1_tok_idx']
+            for valid_file in dataset_valid.file_names:
+                logging.info(f"Valid with file: {valid_file}")
 
-                pred        = model(ques, contx, ans, ans_mask)
-                # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
-                pred        = transpose(pred)
-                # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
-                loss        = criterion(pred, ans_tok_idx)
+                dataset_valid.read_shard(valid_file)
+                n_samples   += len(dataset_valid)
 
-                # Calculate loss
-                loss_test += loss.detach().item()
+                iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch, shuffle=True)
+                for batch in iterator_valid:
+                    ques        = batch['ques'].to(args.device)
+                    contx       = batch['contx'].to(args.device)
+                    # NOTE: Due to limitation, this only uses answer1 only. Later, both answers must be made used of.
+                    ans         = batch['ans1'].to(args.device)
+                    ans_mask    = batch['ans1_mask'].to(args.device)
+                    ans_tok_idx = batch['ans1_tok_idx'].to(args.device)
 
-                # Get batch score
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans_tok_idx)
+                    pred        = model(ques, contx, ans, ans_mask)
+                    # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
+                    pred        = transpose(pred)
+                    # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
+                    loss        = criterion(pred, ans_tok_idx)
 
-                bleu_1 += bleu_1_
-                bleu_4 += bleu_4_
-                meteor += meteor_
-                rouge_l += rouge_l_
+                    # Calculate loss
+                    loss_test += loss.detach().item()
 
-                logging.info(f"  validate: batch {nth_batch} | loss: {loss:5f}")
-                nth_batch += 1
+                    # Get batch score
+                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans_tok_idx)
+
+                    bleu_1  += bleu_1_
+                    bleu_4  += bleu_4_
+                    meteor  += meteor_
+                    rouge_l += rouge_l_
+
+                    logging.info(f"  validate: batch {nth_batch} | loss: {loss:5f}")
+                    nth_batch += 1
 
 
         logging.info(f"End validattion: bleu_1 {bleu_1/n_samples:.5f} | bleu_4 {bleu_4/n_samples:.5f} \
@@ -340,6 +345,6 @@ if __name__ == '__main__':
 
     narrative_pipeline  = Trainer()
 
-    narrative_pipeline.trigger_train()
+    # narrative_pipeline.trigger_train()
 
     narrative_pipeline.trigger_infer()
