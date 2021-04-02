@@ -66,11 +66,13 @@ def find_golden(query, paragraphs, level:int, neighbors:set):
             neighbors.add(k[0])
             found_.append(k[0])
 
-        if len(found_) == MAX_NEIGHBORS:
+        # NOTE: This line is eddited for analyzing purpose
+        if len(found_) == args.n_paras:
             break
-
-    for f in found_:
-        find_golden(f, paragraphs, level+1, neighbors)
+    
+    # NOTE: This block is temporarily commented due to analyzing purpose
+    # for f in found_:
+    #     find_golden(f, paragraphs, level+1, neighbors)
 
 def f_trigger(documents, queue):
     """This function is used to run in parallel to read and initially preprocess
