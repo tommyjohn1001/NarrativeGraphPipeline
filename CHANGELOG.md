@@ -2,6 +2,13 @@
 
 ### This file contains changes and modifications during developing.
 
+## Apr 6, 2021, 14:45
+- Change module *data_reading* significantly:
+    - Construct entire module into class, class *DataReading*
+    - Define may to process story and movie script separatedly
+    - Process context before process each entry => speed up processsing
+    - Apply top-down golden paras selection instead of tree-based
+
 ## Mar 30, 2021, 16:35
 - Change minor thing in *IAL* to speed up training
 - Fix some problems in *trigger_inference*
