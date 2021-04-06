@@ -65,8 +65,9 @@ logging.getLogger().setLevel(logging.INFO)
 ###############################
 PATH    = {
     ## Paths associated with Data Reading
-    'dataset_para'  : "backup/[SPLIT]/data_[SHARD].csv",
-    'vocab_PGD'     : "backup/vocab_PGD.txt",
-    'saved_model'   : "backup/model.pt",
-    'saved_chkpoint': "backup/chkpoint.pth.tar"
+    'dataset_para'      : "backup/[SPLIT]/data_[SHARD].csv",
+    'processed_contx'   : "backup/proc_contx_[SPLIT].json",
+    'vocab_PGD'         : "backup/vocab_PGD.txt",
+    'saved_model'       : "backup/model.pt",
+    'saved_chkpoint'    : "backup/chkpoint.pth.tar"
 }

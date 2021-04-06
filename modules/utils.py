@@ -76,7 +76,7 @@ def check_file_existence(path: str) -> bool:
 
 class ParallelHelper:
     def __init__(self, f_task: object, data: list,
-                 data_allocation: object, num_proc: int = 4):
+                 data_allocation: object, num_proc: int = 4, *args):
         self.n_data = len(data)
 
         self.queue  = multiprocessing.Queue()
@@ -90,7 +90,8 @@ class ParallelHelper:
 
             p = multiprocessing.Process(target=f_task,
                                         args=(data_allocation(data, lo_bound, hi_bound),
-                                              self.queue))
+                                              self.queue,
+                                              args))
             self.jobs.append(p)
 
     def launch(self) -> list:

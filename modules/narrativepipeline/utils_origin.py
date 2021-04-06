@@ -219,6 +219,8 @@ def build_vocab_PGD():
     for split in ["train", "test", "validation"]:
         dataset = load_dataset("narrativeqa", split=split)
 
+        # TODO: Load processed context from files in folder 'backup'
+
         for entry in tqdm(dataset, desc=f"Split '{split}'"):
 
             # Add tokens in context to global vocab

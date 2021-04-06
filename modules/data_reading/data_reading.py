@@ -1,5 +1,6 @@
 '''This file contains code reading raw data and do some preprocessing'''
-import re
+from multiprocessing import Manager
+import re, json, gc
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from datasets import load_dataset
@@ -8,8 +9,9 @@ from scipy import spatial
 import pandas as pd
 import numpy as np
 import spacy
+from tqdm import tqdm
 
-from modules.utils import save_object, ParallelHelper, check_file_existence
+from modules.utils import save_object, check_file_existence, ParallelHelper
 from configs import args, logging, PATH
 
 
@@ -52,8 +54,10 @@ class DataReading():
         # context = re.sub(r'\n ', ' ', context)
         context = re.sub(r'\n{2,}', '\n', context)
 
+        return context
+
     def process_context_movie(self, context, start, end) -> list:
-        """Process context and split into paragrapgs
+        """Process context and split into paragrapgs. Dedicated to movie context.
 
         Args:
             context (str): context (book or movie script)
@@ -86,12 +90,12 @@ class DataReading():
         ## Clean context and split into paras
         sentences   = self.clean_context_movie(context).split('\n')
 
-        paras       = []
+        paras       = np.array([])
         n_tok       = 0 
         para        = ""
         for sent in sentences:
-            ## Tokenize, remove stopword and lemmatization
-            sent_   = [tok.lemma_ for tok in nlp(sent)
+            ## Tokenize, remove stopword
+            sent_   = [tok.text for tok in nlp(sent)
                        if not (tok.is_stop or tok.is_punct)]
 
             ## Concat sentece if not exceed paragraph max len
@@ -99,19 +103,25 @@ class DataReading():
                 n_tok   += len(sent_)
                 para    = para + ' ' + ' '.join(sent_)
             else:
-                paras.append(para)
+                paras   = np.append(paras, para)
                 n_tok   = 0
                 para    = ""
 
 
-        return paras
-
-
-
-
-        return context
+        return paras.tolist()
 
     def process_context_gutenberg(self, context, start, end):
+        """Process context and split into paragrapgs. Dedicated to gutenberg context.
+
+        Args:
+            context (str): context (book or movie script)
+            start (str): start word of context
+            end (str): end word of context
+
+        Returns:
+            list: list of paras
+        """
+
         soup    = BeautifulSoup(context, 'html.parser')
         if soup.pre is not None:
             context = ''.join(list(soup.pre.findAll(text=True)))
@@ -190,23 +200,31 @@ class DataReading():
             n_tok   = len(sent_)
             para    = ' '.join(sent_)
 
-        paras = paras.tolist()
 
-        return paras
+        return paras.tolist()
 
+    # FIXME: These lines are turned of for testing multiprocessing
+    # def process_contx(self, key):
+    #     context, kind, start, end = self.processed_contx[key]
 
-    def process_contx(self, keys, queue):
+    #     if kind == "movie":
+    #         paras   = self.process_context_movie(context, start, end)
+    #     else:
+    #         paras   = self.process_context_gutenberg(context, start, end)
+
+    #     self.processed_contx[key]   = paras
+
+    def f_process_contx(self, keys, queue, args):
+        processed_contx = args[0]
         for key in keys:
-            context, kind, start, end = self.processed_contx[key]
+            context, kind, start, end = processed_contx[key]
 
             if kind == "movie":
                 paras   = self.process_context_movie(context, start, end)
             else:
                 paras   = self.process_context_gutenberg(context, start, end)
 
-            self.processed_contx[key]   = paras
-
-            queue.put(1)
+            queue.put((key, paras))
 
 
     def process_ques_ans(self, text):
@@ -218,7 +236,7 @@ class DataReading():
         Returns:
             str: processed result
         """
-        tok = [tok.lemma_ for tok in nlp(text)
+        tok = [tok.text for tok in nlp(text)
                if not (tok.is_stop or tok.is_punct)]
 
         return ' '.join(tok)
@@ -257,57 +275,60 @@ class DataReading():
 
         return goldens
 
-    def process_entry(self, entry):
+    def process_entry(self, entries, queue, args):
         """This function is used to run in parallel to read and initially preprocess
         raw documents. Afterward, it puts a dict containing result into queue.
 
         Args:
             document (dict): a document of dataset
         """
-        #########################
-        ## Preprocess context
-        #########################
-        paras   = self.processed_contx[entry['document']['id']]
+        processed_contx = args[0]
+
+        for entry in entries:
+            #########################
+            ## Preprocess context
+            #########################
+            paras   = processed_contx[entry['document']['id']]
 
 
-        #########################
-        ## Preprocess question and answer
-        #########################
-        ques    = self.process_ques_ans(entry['question']['text'])
-        ans1    = self.process_ques_ans(entry['answers'][0]['text'])
-        answ2   = self.process_ques_ans(entry['answers'][1]['text'])
+            #########################
+            ## Preprocess question and answer
+            #########################
+            ques    = self.process_ques_ans(entry['question']['text'])
+            ans1    = self.process_ques_ans(entry['answers'][0]['text'])
+            answ2   = self.process_ques_ans(entry['answers'][1]['text'])
 
 
-        #########################
-        ## TfIdf vectorize
-        #########################
-        tfidfvectorizer = TfidfVectorizer(analyzer='word', stop_words='english',
-                                            ngram_range=(1, 3), max_features=500000)
+            #########################
+            ## TfIdf vectorize
+            #########################
+            tfidfvectorizer = TfidfVectorizer(analyzer='word', stop_words='english',
+                                                ngram_range=(1, 3), max_features=500000)
 
-        wm = tfidfvectorizer.fit_transform(paras + [ques, ans1, answ2]).toarray()
+            wm = tfidfvectorizer.fit_transform(paras + [ques, ans1, answ2]).toarray()
 
-        question, answer1, answer2 = len(wm) - 3, len(wm) - 2, len(wm) - 1
-
-
-        #########################
-        ## Find golden paragraphs from
-        ## question and answers
-        #########################
-        golden_paras_ques   = self.find_golden(question, wm)
-
-        golden_paras_answ1  = self.find_golden(answer1, wm)
-        golden_paras_answ2  = self.find_golden(answer2, wm)
-        golden_paras_answ   = golden_paras_answ1 | golden_paras_answ2
+            question, answer1, answer2 = len(wm) - 3, len(wm) - 2, len(wm) - 1
 
 
+            #########################
+            ## Find golden paragraphs from
+            ## question and answers
+            #########################
+            golden_paras_ques   = self.find_golden(question, wm)
 
-        return {
-            'doc_id'    : entry['document']['id'],
-            'question'  : ' '.join(entry['question']['tokens']),
-            'answers'   : [' '.join(x['tokens']) for x in entry['answers']],
-            'En'        : [paras[i] for i in golden_paras_answ],
-            'Hn'        : [paras[i] for i in golden_paras_ques]
-        }
+            golden_paras_answ1  = self.find_golden(answer1, wm)
+            golden_paras_answ2  = self.find_golden(answer2, wm)
+            golden_paras_answ   = golden_paras_answ1 | golden_paras_answ2
+
+
+
+            queue.put({
+                'doc_id'    : entry['document']['id'],
+                'question'  : ' '.join(entry['question']['tokens']),
+                'answers'   : [' '.join(x['tokens']) for x in entry['answers']],
+                'En'        : [paras[i] for i in golden_paras_answ],
+                'Hn'        : [paras[i] for i in golden_paras_ques]
+            })
 
 
     def trigger_reading_data(self):
@@ -316,36 +337,78 @@ class DataReading():
         #########################
         # Process contexts first
         #########################
-        for entry in load_dataset('narrativeqa', split=self.split):
-            try:
-                id_ = entry['document']['id']
-                _   = self.processed_contx[id_]
-            except KeyError:
-                self.processed_contx[id_] = np.array([entry['document']['text'],
-                                                      entry['document']['kind'],
-                                                      entry['document']['start'],
-                                                      entry['document']['end']])
-
-        ParallelHelper(self.f_process_text, self.processed_contx.keys(),
-                       lambda d, lo, hi: d[lo, hi],
-                       num_proc=args.num_proc).launch()
-
-
-        #########################
-        # Process each entry of dataset
-        #########################
         for shard in range(8):
             ### Need to check whether this shard has already been processed
             path    = PATH['dataset_para'].replace("[SPLIT]", self.split).replace("[SHARD]", str(shard))
             if check_file_existence(path):
                 continue
 
-
             logging.info(f"= Process dataset: {self.split} - shard {shard}")
 
             dataset = load_dataset('narrativeqa', split=self.split).shard(8, shard)
 
-            list_documents = [self.process_entry(entry) for entry in dataset]
+
+
+
+            if check_file_existence(PATH['processed_contx'].replace("[SPLIT]", self.split)):
+                logging.info("=> Backed up processed context file existed. Load it.")
+                with open(PATH['processed_contx'].replace("[SPLIT]", self.split), 'r') as d_file:
+                    self.processed_contx    = json.load(d_file)
+
+            logging.info("=> Process context.")
+
+            # Prepare for multiprocessing
+            shared_dict = Manager().dict()
+            for entry in tqdm(dataset, desc="Visis"):
+                try:
+                    id_ = entry['document']['id']
+                    _   = self.processed_contx[id_]
+                except KeyError:
+                    shared_dict[id_] = np.array([entry['document']['text'],
+                                                        entry['document']['kind'],
+                                                        entry['document']['start'],
+                                                        entry['document']['end']])
+
+            
+
+            # Start processing context in parallel
+            list_tuples = ParallelHelper(self.f_process_contx, list(shared_dict.keys()),
+                                        lambda d, l, h: d[l:h],
+                                        args.num_proc, shared_dict).launch()
+
+            self.processed_contx.update({it[0]: it[1] for it in list_tuples})
+
+
+            # Backup processed contexts
+            with open(PATH['processed_contx'].replace("[SPLIT]", self.split), 'w+') as d_file:
+                json.dump(self.processed_contx, d_file, indent=2, ensure_ascii=False)
+                logging.info("=> Backed up processed context.")
+
+            shared_dict = list_tuples = None
+            gc.collect()
+                
+
+
+
+        #########################
+        # Process each entry of dataset
+        #########################
+        # for shard in range(8):
+        #     ### Need to check whether this shard has already been processed
+        #     path    = PATH['dataset_para'].replace("[SPLIT]", self.split).replace("[SHARD]", str(shard))
+        #     if check_file_existence(path):
+        #         continue
+
+        #     logging.info(f"= Process dataset: {self.split} - shard {shard}")
+
+        #     dataset = load_dataset('narrativeqa', split=self.split).shard(8, shard)
+
+            # list_documents = list(map(self.process_entry, tqdm(dataset, desc="Process entry")))
+            shared_dict = Manager().dict()
+            shared_dict.update(self.processed_contx)
+            list_documents  = ParallelHelper(self.process_entry, dataset,
+                                             lambda d, l, h: d.select(range(l,h)),
+                                             args.num_proc, shared_dict).launch()
 
             save_object(path, pd.DataFrame(list_documents))
 
@@ -354,4 +417,5 @@ if __name__ == '__main__':
     logging.info("* Reading raw data and decompose into paragraphs")
 
     for split in ['validation', 'train', 'test']:
+        logging.info(f"Process split {split}")
         DataReading(split).trigger_reading_data()
