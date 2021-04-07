@@ -61,7 +61,7 @@ def save_object(path: str, obj_file: object, is_dataframe:bool = True) -> object
             pickle.dump(obj_file, dat_file)
 
 
-def check_file_existence(path: str) -> bool:
+def check_exist(path: str) -> bool:
     """
     Check whether file given by `path` exists.
     Args:

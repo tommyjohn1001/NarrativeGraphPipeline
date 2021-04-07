@@ -9,9 +9,8 @@ from scipy import spatial
 import pandas as pd
 import numpy as np
 import spacy
-from tqdm import tqdm
 
-from modules.utils import save_object, check_file_existence, ParallelHelper
+from modules.utils import save_object, check_exist, ParallelHelper
 from configs import args, logging, PATH
 
 
@@ -37,7 +36,6 @@ class DataReading():
     def clean_context_movie(self, context:str) -> str:
         context = context.lower().strip()
 
-        context = re.sub(r'( {2,}|\t)', ' ', context)
         context = re.sub(r' \n ', '\n', context)
         # context = re.sub(r'\n ', ' ', context)
         context = re.sub(r"(?<=\w|,)\n(?=\w| )", ' ', context)
@@ -92,20 +90,20 @@ class DataReading():
 
         paras       = np.array([])
         n_tok       = 0 
-        para        = ""
+        para        = []
         for sent in sentences:
             ## Tokenize, remove stopword
             sent_   = [tok.text for tok in nlp(sent)
-                       if not (tok.is_stop or tok.is_punct)]
+                        if not (tok.is_stop or tok.is_punct)]
 
             ## Concat sentece if not exceed paragraph max len
             if n_tok + len(sent_) < 50:
                 n_tok   += len(sent_)
-                para    = para + ' ' + ' '.join(sent_)
+                para.extend(sent_)
             else:
-                paras   = np.append(paras, para)
+                paras   = np.append(paras, re.sub(r'( {2,}|\t)', ' ', ' '.join(para)).strip())
                 n_tok   = 0
-                para    = ""
+                para    = []
 
 
         return paras.tolist()
@@ -334,32 +332,34 @@ class DataReading():
     def trigger_reading_data(self):
         """ Start reading and processing data
         """
-        #########################
-        # Process contexts first
-        #########################
         for shard in range(8):
+            #########################
+            # Load shard of dataset
+            #########################
             ### Need to check whether this shard has already been processed
             path    = PATH['dataset_para'].replace("[SPLIT]", self.split).replace("[SHARD]", str(shard))
-            if check_file_existence(path):
+            if check_exist(path):
                 continue
-
             logging.info(f"= Process dataset: {self.split} - shard {shard}")
 
             dataset = load_dataset('narrativeqa', split=self.split).shard(8, shard)
 
 
 
+            #########################
+            # Process contexts first
+            #########################
+            logging.info(f"= Process context in shard {shard}")
 
-            if check_file_existence(PATH['processed_contx'].replace("[SPLIT]", self.split)):
+            if check_exist(PATH['processed_contx'].replace("[SPLIT]", self.split)):
                 logging.info("=> Backed up processed context file existed. Load it.")
                 with open(PATH['processed_contx'].replace("[SPLIT]", self.split), 'r') as d_file:
                     self.processed_contx    = json.load(d_file)
 
-            logging.info("=> Process context.")
 
-            # Prepare for multiprocessing
-            shared_dict = Manager().dict()
-            for entry in tqdm(dataset, desc="Visis"):
+            # Check whether contexts in this shard have been preprocessed
+            shared_dict = Manager().dict()  # Prepare for multiprocessing
+            for entry in dataset:
                 try:
                     id_ = entry['document']['id']
                     _   = self.processed_contx[id_]
@@ -369,15 +369,13 @@ class DataReading():
                                                         entry['document']['start'],
                                                         entry['document']['end']])
 
-            
-
             # Start processing context in parallel
             list_tuples = ParallelHelper(self.f_process_contx, list(shared_dict.keys()),
                                         lambda d, l, h: d[l:h],
                                         args.num_proc, shared_dict).launch()
 
+            # Update self.processed_contx with already processed contexts
             self.processed_contx.update({it[0]: it[1] for it in list_tuples})
-
 
             # Backup processed contexts
             with open(PATH['processed_contx'].replace("[SPLIT]", self.split), 'w+') as d_file:
@@ -386,17 +384,12 @@ class DataReading():
 
             shared_dict = list_tuples = None
             gc.collect()
-                
 
 
-
-        #########################
-        # Process each entry of dataset
-        #########################
         # for shard in range(8):
         #     ### Need to check whether this shard has already been processed
         #     path    = PATH['dataset_para'].replace("[SPLIT]", self.split).replace("[SHARD]", str(shard))
-        #     if check_file_existence(path):
+        #     if check_exist(path):
         #         continue
 
         #     logging.info(f"= Process dataset: {self.split} - shard {shard}")
@@ -404,6 +397,9 @@ class DataReading():
         #     dataset = load_dataset('narrativeqa', split=self.split).shard(8, shard)
 
             # list_documents = list(map(self.process_entry, tqdm(dataset, desc="Process entry")))
+            #########################
+            # Process each entry of dataset
+            #########################
             shared_dict = Manager().dict()
             shared_dict.update(self.processed_contx)
             list_documents  = ParallelHelper(self.process_entry, dataset,
@@ -416,6 +412,5 @@ class DataReading():
 if __name__ == '__main__':
     logging.info("* Reading raw data and decompose into paragraphs")
 
-    for split in ['validation', 'train', 'test']:
-        logging.info(f"Process split {split}")
-        DataReading(split).trigger_reading_data()
+    for splt in ['validation', 'train', 'test']:
+        DataReading(splt).trigger_reading_data()
