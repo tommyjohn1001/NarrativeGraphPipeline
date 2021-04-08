@@ -3,9 +3,9 @@ from multiprocessing import Manager
 import re, json, gc
 
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 from datasets import load_dataset
 from bs4 import BeautifulSoup
-from scipy import spatial
 import pandas as pd
 import numpy as np
 import spacy
@@ -201,16 +201,6 @@ class DataReading():
 
         return paras.tolist()
 
-    # FIXME: These lines are turned of for testing multiprocessing
-    # def process_contx(self, key):
-    #     context, kind, start, end = self.processed_contx[key]
-
-    #     if kind == "movie":
-    #         paras   = self.process_context_movie(context, start, end)
-    #     else:
-    #         paras   = self.process_context_gutenberg(context, start, end)
-
-    #     self.processed_contx[key]   = paras
 
     def f_process_contx(self, keys, queue, args):
         processed_contx = args[0]
@@ -242,19 +232,12 @@ class DataReading():
     ############################################################
     # Methods to find golden passages given question or answers
     ############################################################
-    def get_score(self, v1, v2):
-        if np.linalg.norm(v1) * np.linalg.norm(v2) == 0:
-            return -1
-
-        return 1 - spatial.distance.cosine(v1, v2)
-
     def find_golden(self, query, wm: list) -> set:
 
         ## Calculate score of query for each para
-        scores = [
-            (ith, self.get_score(wm[query], wm[ith]))
-            for ith in range(0, len(wm) - 3)
-        ]
+        query_  = np.expand_dims(wm[query], 0)
+        wm_     = wm[:-3]
+        scores  = cosine_similarity(query_, wm_).squeeze(0)
 
         goldens   = set()
 
@@ -386,17 +369,6 @@ class DataReading():
             gc.collect()
 
 
-        # for shard in range(8):
-        #     ### Need to check whether this shard has already been processed
-        #     path    = PATH['dataset_para'].replace("[SPLIT]", self.split).replace("[SHARD]", str(shard))
-        #     if check_exist(path):
-        #         continue
-
-        #     logging.info(f"= Process dataset: {self.split} - shard {shard}")
-
-        #     dataset = load_dataset('narrativeqa', split=self.split).shard(8, shard)
-
-            # list_documents = list(map(self.process_entry, tqdm(dataset, desc="Process entry")))
             #########################
             # Process each entry of dataset
             #########################
