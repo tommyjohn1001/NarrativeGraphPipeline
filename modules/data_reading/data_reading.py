@@ -82,6 +82,8 @@ class DataReading():
             start_ = 0
         if end_ == -1:
             end_ = len(context)
+        if start_ >= end_:
+            start_, end_    = 0, len(context)
 
         context = context[start_:end_]
 
@@ -237,20 +239,22 @@ class DataReading():
         ## Calculate score of query for each para
         query_  = np.expand_dims(wm[query], 0)
         wm_     = wm[:-3]
+
         scores  = cosine_similarity(query_, wm_).squeeze(0)
+
 
         goldens   = set()
 
-        for score in scores:
-            if score[1] > 0:
-                goldens.add(score[0])
+        for ith, score in enumerate(scores):
+            if score > 0:
+                goldens.add(ith)
                 if len(goldens) == args.n_paras:
                     break
 
         if len(goldens) < args.n_paras:
-            for score in scores:
-                if score[1] == 0:
-                    goldens.add(score[0])
+            for ith, score in enumerate(scores):
+                if score == 0:
+                    goldens.add(ith)
                     if len(goldens) == args.n_paras:
                         break
 
