@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import numpy as np
 import spacy
+import unidecode
 
 from modules.utils import save_object, check_exist, ParallelHelper
 from configs import args, logging, PATH
@@ -36,15 +37,20 @@ class DataReading():
     def clean_context_movie(self, context:str) -> str:
         context = context.lower().strip()
 
+        context = re.sub(r"(style\=\".*\"\>|class\=.*\>)", '', context)
+
         context = re.sub(r' \n ', '\n', context)
         # context = re.sub(r'\n ', ' ', context)
         context = re.sub(r"(?<=\w|,)\n(?=\w| )", ' ', context)
         context = re.sub(r'\n{2,}', '\n', context)
 
+
         return context
 
     def clean_context_gutenberg(self, context:str) -> str:
         context = context.lower().strip()
+
+        context = re.sub(r"(style\=\".*\"\>|class\=.*\>)", '', context)
 
         context = re.sub(r"(?<=\w|,|;|-)\n(?=\w| )", ' ', context)
         context = re.sub(r'( {2,}|\t)', ' ', context)
@@ -52,10 +58,32 @@ class DataReading():
         # context = re.sub(r'\n ', ' ', context)
         context = re.sub(r'\n{2,}', '\n', context)
 
+
         return context
 
     def export_para(self, toks):
         return re.sub(r'( {2,}|\t)', ' ', ' '.join(toks)).strip()
+
+    def extract_html(self, context):
+        soup    = BeautifulSoup(context, 'html.parser')
+        context = unidecode.unidecode(soup.text)
+        return  context
+
+    def extract_start_end(self, context, start, end):
+        end    = self.clean_end(end)
+
+        start  = context.find(start)
+        end    = context.rfind(end)
+        if start == -1:
+            start = 0
+        if end == -1:
+            end = len(context)
+        if start >= end:
+            start, end    = 0, len(context)
+
+        context = context[start:end]
+
+        return context
 
     def process_context_movie(self, context, start, end) -> list:
         """Process context and split into paragrapgs. Dedicated to movie context.
@@ -70,25 +98,10 @@ class DataReading():
         """
 
         ## Extract text from HTML
-        soup    = BeautifulSoup(context, 'html.parser')
-        if soup.pre is not None:
-            context = ''.join(list(soup.pre.findAll(text=True)))
+        context = self.extract_html(context)
 
         ## Use field 'start' and 'end' provided
-        start_  = start.lower()
-        end_    = end.lower()
-        end_    = self.clean_end(end_)
-
-        start_  = context.find(start_)
-        end_    = context.rfind(end_)
-        if start_ == -1:
-            start_ = 0
-        if end_ == -1:
-            end_ = len(context)
-        if start_ >= end_:
-            start_, end_    = 0, len(context)
-
-        context = context[start_:end_]
+        context = self.extract_start_end(context, start, end)
 
         ## Clean context and split into paras
         sentences   = self.clean_context_movie(context).split('\n')
@@ -125,25 +138,11 @@ class DataReading():
             list: list of paras
         """
 
-        soup    = BeautifulSoup(context, 'html.parser')
-        if soup.pre is not None:
-            context = ''.join(list(soup.pre.findAll(text=True)))
+        ## Extract text from HTML
+        context = self.extract_html(context)
 
         ## Use field 'start' and 'end' provided
-        start_  = start.lower()
-        end_    = end.lower()
-        end_    = self.clean_end(end_)
-
-        start_  = context.find(start_)
-        end_    = context.rfind(end_)
-        if start_ == -1:
-            start_ = 0
-        if end_ == -1:
-            end_ = len(context)
-        if start_ >= end_:
-            start_, end_    = 0, len(context)
-
-        context = context[start_:end_]
+        context = self.extract_start_end(context, start, end)
 
         ## Clean context and split into paras
         sentences   = self.clean_context_gutenberg(context).split('\n')
