@@ -54,6 +54,9 @@ class DataReading():
 
         return context
 
+    def export_para(self, toks):
+        return re.sub(r'( {2,}|\t)', ' ', ' '.join(toks)).strip()
+
     def process_context_movie(self, context, start, end) -> list:
         """Process context and split into paragrapgs. Dedicated to movie context.
 
@@ -103,7 +106,7 @@ class DataReading():
                 n_tok   += len(sent_)
                 para.extend(sent_)
             else:
-                paras   = np.append(paras, re.sub(r'( {2,}|\t)', ' ', ' '.join(para)).strip())
+                paras   = np.append(paras, self.export_para(para))
                 n_tok   = 0
                 para    = []
 
@@ -126,7 +129,7 @@ class DataReading():
         if soup.pre is not None:
             context = ''.join(list(soup.pre.findAll(text=True)))
 
-        # Use field 'start' and 'end' provided
+        ## Use field 'start' and 'end' provided
         start_  = start.lower()
         end_    = end.lower()
         end_    = self.clean_end(end_)
@@ -137,6 +140,8 @@ class DataReading():
             start_ = 0
         if end_ == -1:
             end_ = len(context)
+        if start_ >= end_:
+            start_, end_    = 0, len(context)
 
         context = context[start_:end_]
 
@@ -145,7 +150,7 @@ class DataReading():
 
         paras       = np.array([])
         n_tok       = 0
-        para        = ""
+        para        = []
         for sent in sentences:
             ## Tokenize, remove stopword
             sent_   = [tok.text for tok in nlp(sent)
@@ -156,10 +161,10 @@ class DataReading():
                 # apply concatenating strategy
 
                 # Finish concateraning para
-                if para != "":
-                    paras = np.append(paras, para)
+                if len(para) > 0:
+                    paras = np.append(paras, self.export_para(para))
                     n_tok   = 0
-                    para    = ""
+                    para    = []
 
                 # Split into sentences and
                 # apply concatenating strategy
@@ -169,36 +174,30 @@ class DataReading():
 
                     if n_tok + len(sent_) < 50:
                         n_tok   += len(sent_)
-                        if para != "":
-                            para    = para + ' ' + ' '.join(sent_)
-                        else:
-                            para    = ' '.join(sent_)
+                        para.extend(sent_)
                     else:
-                        paras   = np.append(paras, para)
+                        paras   = np.append(paras, self.export_para(para))
                         n_tok   = len(sent_)
-                        para    = ' '.join(sent_)
+                        para    = sent_
 
-                if para != "":
-                    paras = np.append(paras, para)
+                if len(para) > 0:
+                    paras = np.append(paras, self.export_para(para))
                     n_tok   = 0
-                    para    = ""
+                    para    = []
 
             else:
                 if n_tok + len(sent_) < 50:
                     n_tok   += len(sent_)
-                    if para != "":
-                        para    = para + ' ' + ' '.join(sent_)
-                    else:
-                        para    = ' '.join(sent_)
+                    para.extend(sent_)
                 else:
-                    paras = np.append(paras, para)
-                    n_tok   = 0
-                    para    = ""
+                    paras   = np.append(paras, self.export_para(para))
+                    n_tok   = len(sent_)
+                    para    = sent_
 
         if para != "":
-            paras   = np.append(paras, para)
+            paras   = np.append(paras, self.export_para(para))
             n_tok   = len(sent_)
-            para    = ' '.join(sent_)
+            para    = sent_
 
 
         return paras.tolist()
@@ -388,5 +387,5 @@ class DataReading():
 if __name__ == '__main__':
     logging.info("* Reading raw data and decompose into paragraphs")
 
-    for splt in ['validation', 'train', 'test']:
+    for splt in ['test']:
         DataReading(splt).trigger_reading_data()
