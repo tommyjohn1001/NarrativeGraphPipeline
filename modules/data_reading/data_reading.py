@@ -62,7 +62,16 @@ class DataReading():
         return context
 
     def export_para(self, toks):
-        return re.sub(r'( {2,}|\t)', ' ', ' '.join(toks)).strip()
+        # NOTE: The following code follows the original paper, and for analyzing purpose only.
+        # NOTE: remove the following and use the line of code commented after this piece of code
+        para_   = []
+        for i in range(0, len(toks), args.seq_len_para):
+            para_.append(re.sub(r'( {2,}|\t)', ' ', ' '.join(toks[i:i+args.seq_len_para])).strip())
+
+        return np.array(para_)
+
+        # NOTE: This is the line must be uncommented
+        # return re.sub(r'( {2,}|\t)', ' ', ' '.join(toks)).strip()
 
     def extract_html(self, context):
         soup    = BeautifulSoup(context, 'html.parser')
@@ -115,11 +124,11 @@ class DataReading():
                         if not (tok.is_stop or tok.is_punct)]
 
             ## Concat sentece if not exceed paragraph max len
-            if n_tok + len(sent_) < 50:
+            if n_tok + len(sent_) < args.seq_len_para:
                 n_tok   += len(sent_)
                 para.extend(sent_)
             else:
-                paras   = np.append(paras, self.export_para(para))
+                paras   = np.concatenate((paras, self.export_para(para)))
                 n_tok   = 0
                 para    = []
 
@@ -155,13 +164,13 @@ class DataReading():
             sent_   = [tok.text for tok in nlp(sent)
                     if not (tok.is_stop or tok.is_punct)]
 
-            if len(sent_) > 50:
+            if len(sent_) > args.seq_len_para:
                 # Long paragraph: split into sentences and
                 # apply concatenating strategy
 
                 # Finish concateraning para
                 if len(para) > 0:
-                    paras = np.append(paras, self.export_para(para))
+                    paras   = np.concatenate((paras, self.export_para(para)))
                     n_tok   = 0
                     para    = []
 
@@ -171,30 +180,30 @@ class DataReading():
                     sent_   = [tok.text for tok in sub_sent
                             if not (tok.is_stop or tok.is_punct)]
 
-                    if n_tok + len(sent_) < 50:
+                    if n_tok + len(sent_) < args.seq_len_para:
                         n_tok   += len(sent_)
                         para.extend(sent_)
                     else:
-                        paras   = np.append(paras, self.export_para(para))
+                        paras   = np.concatenate((paras, self.export_para(para)))
                         n_tok   = len(sent_)
                         para    = sent_
 
                 if len(para) > 0:
-                    paras = np.append(paras, self.export_para(para))
+                    paras   = np.concatenate((paras, self.export_para(para)))
                     n_tok   = 0
                     para    = []
 
             else:
-                if n_tok + len(sent_) < 50:
+                if n_tok + len(sent_) < args.seq_len_para:
                     n_tok   += len(sent_)
                     para.extend(sent_)
                 else:
-                    paras   = np.append(paras, self.export_para(para))
+                    paras   = np.concatenate((paras, self.export_para(para)))
                     n_tok   = len(sent_)
                     para    = sent_
 
         if para != "":
-            paras   = np.append(paras, self.export_para(para))
+            paras   = np.concatenate((paras, self.export_para(para)))
             n_tok   = len(sent_)
             para    = sent_
 
