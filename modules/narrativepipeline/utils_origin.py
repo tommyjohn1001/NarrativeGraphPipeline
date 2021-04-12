@@ -31,7 +31,7 @@ SEP = "[SEP]"
 special_toks = set([PAD, CLS, UNK, SEP])
 
 def pad(l, max_len):
-    return l + [PAD]*(max_len - len(l))
+    return l + [PAD]*(max_len - len(l)), len(l)
 
 class Vocab:
     def __init__(self, path_vocab) -> None:
@@ -99,33 +99,32 @@ class CustomDataset(Dataset):
             ###########################
             # Process question
             ###########################
-            question    = pad(entry.question.split(' '), args.seq_len_ques)
-            question    = glove_embd.get_vecs_by_tokens(question).numpy()
+            ques, ques_len  = pad(entry.question.split(' '), args.seq_len_ques)
+            ques            = glove_embd.get_vecs_by_tokens(ques).numpy()
 
 
             ###########################
             # Process answers including mask token id and embedding form
             ###########################
-            answers     = ast.literal_eval(entry.answers)
-            answer1     = answers[0].split(' ')
-            answer2     = answers[1].split(' ')
+            answers         = ast.literal_eval(entry.answers)
+            ans1, ans2      = answers[0].split(' '), answers[1].split(' ')
 
 
-            answer1_mask    = np.array([1]*len(answer1) +\
-                                [0]*(args.seq_len_ans - len(answer1)), dtype=np.float)
-            answer2_mask    = np.array([1]*len(answer2) +\
-                                [0]*(args.seq_len_ans - len(answer2)), dtype=np.float)
+            ans1_mask       = np.array([1]*len(ans1) +\
+                                       [0]*(args.seq_len_ans - len(ans1)), dtype=np.float)
+            ans2_mask       = np.array([1]*len(ans2) +\
+                                       [0]*(args.seq_len_ans - len(ans2)), dtype=np.float)
 
-            answer1         = pad(answer1, args.seq_len_ans)
-            answer2         = pad(answer2, args.seq_len_ans)
+            ans1, ans1_len  = pad(ans1, args.seq_len_ans)
+            ans2, ans2_len  = pad(ans2, args.seq_len_ans)
 
-            answer1_tok_idx = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
-                                for w in answer1], dtype=np.long)
-            answer2_tok_idx = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
-                                for w in answer2], dtype=np.long)
+            ans1_tok_idx    = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
+                                        for w in ans1], dtype=np.long)
+            ans2_tok_idx    = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w] 
+                                        for w in ans2], dtype=np.long)
 
-            answer1 = glove_embd.get_vecs_by_tokens(answer1).numpy()
-            answer2 = glove_embd.get_vecs_by_tokens(answer2).numpy()
+            ans1 = glove_embd.get_vecs_by_tokens(ans1).numpy()
+            ans2 = glove_embd.get_vecs_by_tokens(ans2).numpy()
 
 
             ###########################
@@ -134,31 +133,35 @@ class CustomDataset(Dataset):
             En      = ast.literal_eval(entry.En)
             Hn      = ast.literal_eval(entry.Hn)
 
-            context = En[self.n_exchange:] + Hn[:self.n_exchange]
+            contx = En[self.n_exchange:] + Hn[:self.n_exchange]
 
             # Process context
 
             # Remove HTML tag
-            context = BeautifulSoup(' '.join(context), 'html.parser').get_text()
+            contx = BeautifulSoup(' '.join(contx), 'html.parser').get_text()
             # Tokenize context
-            context = [tok.text for tok in nlp(context)]
+            contx = [tok.text for tok in nlp(contx)]
 
             # Pad context
-            context = pad(context, SEQ_LEN_CONTEXT)
+            contx, contx_len    = pad(contx, SEQ_LEN_CONTEXT)
             # Embed context by GloVe
-            context = glove_embd.get_vecs_by_tokens(context).numpy()
+            contx = glove_embd.get_vecs_by_tokens(contx).numpy()
 
             # context: [SEQ_LEN_CONTEXT = 1600, d_embd = 200]
 
             queue.put({
-                'ques'          : question,
-                'ans1'          : answer1,
-                'ans2'          : answer2,
-                'ans1_mask'     : answer1_mask,
-                'ans2_mask'     : answer2_mask,
-                'ans1_tok_idx'  : answer1_tok_idx,
-                'ans2_tok_idx'  : answer2_tok_idx,
-                'contx'         : context
+                'ques'          : ques,
+                'ques_len'      : ques_len,
+                'ans1'          : ans1,
+                'ans2'          : ans2,
+                'ans1_len'      : ans1_len,
+                'ans2_len'      : ans2_len,
+                'ans1_mask'     : ans1_mask,
+                'ans2_mask'     : ans2_mask,
+                'ans1_tok_idx'  : ans1_tok_idx,
+                'ans2_tok_idx'  : ans2_tok_idx,
+                'contx'         : contx,
+                'contx_len'     : contx_len
             })
 
     def read_shard(self, path_file):
@@ -231,7 +234,7 @@ def build_vocab_PGD():
                         not tok.like_url:
                         word_count[tok.text] += 1
 
-        # Add tokens in answer1 and answer2 to global vocab
+        # Add tokens in ans1 and ans2 to global vocab
         dataset = load_dataset("narrativeqa", split=split)
         for entry in tqdm(dataset, total=len(dataset), desc="Get answers"):
             for tok in entry['answers'][0]['tokens'] + entry['answers'][1]['tokens']:

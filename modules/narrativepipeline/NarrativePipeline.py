@@ -21,19 +21,22 @@ class  NarrativePipeline(torch_nn.Module):
         self.reasoning  = IntrospectiveAlignmentLayer()
         self.pg_decoder = PointerGeneratorDecoder()
 
-    def forward(self, ques, contx, ans, ans_mask):
-        # ques      : [batch, seq_len_ques, d_embd]
-        # contx     : [batch, seq_len_contx, d_embd]
-        # ans       : [batch, max_len_ans, d_embd]
-        # ans_mask  : [batch, max_len_ans]
+    def forward(self, ques, ques_len, contx, contx_len, ans, ans_len, ans_mask):
+        # ques      : [b, seq_len_ques, d_embd]
+        # ques_len  : [b]
+        # contx     : [b, seq_len_contx, d_embd]
+        # contx_len : [b]
+        # ans       : [b, max_len_ans, d_embd]
+        # ans_len   : [b]
+        # ans_mask  : [b, max_len_ans]
         # NOTE: all arguments used in this method must not modify the orginal
 
         ####################
         # Embed question and context
         # by LSTM
         ####################
-        H_q = self.embd_layer(ques)
-        H_c = self.embd_layer(contx)
+        H_q     = self.embd_layer(ques, ques_len)
+        H_c     = self.embd_layer(contx, contx_len)
         # H_q   : [batch, seq_len_ques, d_hid]
         # H_c   : [batch, seq_len_contx, d_hid]
 
@@ -48,7 +51,7 @@ class  NarrativePipeline(torch_nn.Module):
         ####################
         # Generate answer with PGD
         ####################
-        pred    = self.pg_decoder(Y, H_q, ans, ans_mask)
+        pred    = self.pg_decoder(Y, H_q, ans, ans_len, ans_mask)
         # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
 
         return pred
@@ -129,15 +132,18 @@ class Trainer():
 
             for batch in iterator_train:
                 ques        = batch['ques'].to(args.device)
+                ques_len    = batch['ques_len']
                 contx       = batch['contx'].to(args.device)
+                contx_len   = batch['contx_len']
                 # NOTE: Due to limitation, this only uses answer1 only. Later, both answers must be made used of.
                 ans         = batch['ans1'].to(args.device)
+                ans_len     = batch['ans1_len']
                 ans_mask    = batch['ans1_mask'].to(args.device)
                 ans_tok_idx = batch['ans1_tok_idx'].to(args.device)
 
                 optimizer.zero_grad()
 
-                pred        = model(ques, contx, ans, ans_mask)
+                pred        = model(ques, ques_len, contx, contx_len, ans, ans_len, ans_mask)
                 # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
                 pred        = transpose(pred)
                 # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
@@ -170,13 +176,16 @@ class Trainer():
 
                 for batch in iterator_test:
                     ques        = batch['ques'].to(args.device)
+                    ques_len    = batch['ques_len']
                     contx       = batch['contx'].to(args.device)
+                    contx_len   = batch['contx_len']
                     # NOTE: Due to limitation, this only uses answer1 only. Later, both answers must be made used of.
                     ans         = batch['ans1'].to(args.device)
+                    ans_len     = batch['ans1_len']
                     ans_mask    = batch['ans1_mask'].to(args.device)
                     ans_tok_idx = batch['ans1_tok_idx'].to(args.device)
 
-                    pred        = model(ques, contx, ans, ans_mask)
+                    pred        = model(ques, ques_len, contx, contx_len, ans, ans_len, ans_mask)
                     # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
                     pred        = transpose(pred)
                     # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
@@ -309,13 +318,16 @@ class Trainer():
                 iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch, shuffle=True)
                 for batch in iterator_valid:
                     ques        = batch['ques'].to(args.device)
+                    ques_len    = batch['ques_len']
                     contx       = batch['contx'].to(args.device)
+                    contx_len   = batch['contx_len']
                     # NOTE: Due to limitation, this only uses answer1 only. Later, both answers must be made used of.
                     ans         = batch['ans1'].to(args.device)
+                    ans_len     = batch['ans1_len']
                     ans_mask    = batch['ans1_mask'].to(args.device)
                     ans_tok_idx = batch['ans1_tok_idx'].to(args.device)
 
-                    pred        = model(ques, contx, ans, ans_mask)
+                    pred        = model(ques, ques_len, contx, contx_len, ans, ans_len, ans_mask)
                     # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
                     pred        = transpose(pred)
                     # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
@@ -345,6 +357,6 @@ if __name__ == '__main__':
 
     narrative_pipeline  = Trainer()
 
-    # narrative_pipeline.trigger_train()
+    narrative_pipeline.trigger_train()
 
     narrative_pipeline.trigger_infer()
