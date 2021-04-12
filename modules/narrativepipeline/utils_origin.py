@@ -1,7 +1,7 @@
 '''This file contain modules for loading data and training procedure. Other component layers
 are in other directories.'''
 from collections import defaultdict
-import glob, ast, gc
+import glob, ast, gc, json
 
 from torch.utils.data import Dataset
 from torchtext.vocab import Vectors
@@ -13,7 +13,6 @@ import pandas as pd
 import numpy as np
 import spacy
 
-from modules.data_reading.data_reading import clean_end, clean_text
 from modules.utils import ParallelHelper
 from configs import logging, args, PATH
 
@@ -209,7 +208,7 @@ def build_vocab_PGD():
     nlp_            = spacy.load("en_core_web_sm", disable=['ner', 'parser', 'tagger'])
     nlp_.max_length  = 2500000
 
-    read_stories    = set()
+
     word_count      = defaultdict(int)
 
     answer_toks     = set()
@@ -217,47 +216,24 @@ def build_vocab_PGD():
 
     # Read stories in train, test, valid set
     for split in ["train", "test", "validation"]:
-        dataset = load_dataset("narrativeqa", split=split)
+        logging.info(f"Process split: {split}")
 
-        for entry in tqdm(dataset, desc=f"Split '{split}'"):
+        path    = PATH['processed_contx'].replace("[SPLIT]", split)
+        with open(path, 'r') as d_file:
+            contexts    = json.load(d_file)
 
-            # Add tokens in context to global vocab
-            if entry['document']['id'] not in read_stories:     # This line ensures we dont read a document twice
-
-                read_stories.add(entry['document']['id'])
-
-                # Process text
-                context = entry['document']['text']
-
-                ## Extract text from HTML
-                soup    = BeautifulSoup(context, 'html.parser')
-                if soup.pre is not None:
-                    context = ''.join(list(soup.pre.findAll(text=True)))
-
-                ## Clean and lowercase
-                context = clean_text(context)
-
-
-                start_  = entry['document']['start'].lower()
-                end_    = entry['document']['end'].lower()
-                end_    = clean_end(end_)
-
-                start_  = context.find(start_)
-                end_    = context.rfind(end_)
-                if start_ == -1:
-                    start_ = 0
-                if end_ == -1:
-                    end_ = len(context)
-
-                context = context[start_:end_]
-
-                for tok in nlp_(context):
+        # Add tokens in context to global vocab
+        for context in tqdm(contexts.values(), desc="Get context"):
+            for para in context:
+                for tok in nlp_(para):
                     if  not tok.is_punct and\
                         not tok.is_stop and\
                         not tok.like_url:
                         word_count[tok.text] += 1
 
-            # Add tokens in answer1 and answer2 to global vocab
+        # Add tokens in answer1 and answer2 to global vocab
+        dataset = load_dataset("narrativeqa", split=split)
+        for entry in tqdm(dataset, total=len(dataset), desc="Get answers"):
             for tok in entry['answers'][0]['tokens'] + entry['answers'][1]['tokens']:
                 answer_toks.add(tok.lower())
 

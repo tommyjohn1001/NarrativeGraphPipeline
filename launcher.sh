@@ -9,10 +9,10 @@ launch()
     mkdir -p backup
 
     # echo "1. Decompose each document in dataset into paragraphs."
-    # python -m modules.data_reading.data_reading --num_proc 5
+    python -m modules.data_reading.data_reading --num_proc 8
 
     # echo "2. Start training"
-    python -m modules.narrativepipeline.NarrativePipeline --batch 30 --num_proc 10 --n_epochs 50
+    python -m modules.narrativepipeline.NarrativePipeline --batch 30 --num_proc 8 --n_epochs 50
 }
 
 

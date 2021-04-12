@@ -9,7 +9,7 @@ from transformers import AdamW
 
 from modules.narrativepipeline.utils_origin import CustomDataset, build_vocab_PGD, Vocab
 from modules.pg_decoder.PointerGeneratorDecoder import PointerGeneratorDecoder
-from modules.utils import EmbeddingLayer, check_file_existence, transpose, get_scores
+from modules.utils import EmbeddingLayer, check_exist, transpose, get_scores
 from modules.Reasoning.IAL import IntrospectiveAlignmentLayer
 from configs import args, logging, PATH
 
@@ -35,14 +35,14 @@ class  NarrativePipeline(torch_nn.Module):
         H_q = self.embd_layer(ques)
         H_c = self.embd_layer(contx)
         # H_q   : [batch, seq_len_ques, d_hid]
-        # H_c   : [batch, seq_len_contex, d_hid]
+        # H_c   : [batch, seq_len_contx, d_hid]
 
 
         ####################
         # Do reasoning with IAL
         ####################
         Y       = self.reasoning(H_q, H_c)
-        # Y: [batch, seq_len_context, 2*d_hid]
+        # Y: [batch, seq_len_contx, 2*d_hid]
 
 
         ####################
@@ -62,7 +62,7 @@ class Trainer():
         # Build vocab for PointerGeneratorDecoder
         ################################
         logging.info("Preparation: Build vocab for PGD")
-        if not check_file_existence(PATH['vocab_PGD']):
+        if not check_exist(PATH['vocab_PGD']):
             build_vocab_PGD()
 
 
@@ -111,7 +111,7 @@ class Trainer():
         Returns:
             dict: dict containing necessary info for training
         """
-        if check_file_existence(PATH['saved_chkpoint']):
+        if check_exist(PATH['saved_chkpoint']):
             logging.info("=> Saved checkpoint instance existed. Load it.")
         return torch.load(PATH['saved_chkpoint'])
 
@@ -210,7 +210,7 @@ class Trainer():
         start_epoch = 0
 
         # Check if previous checkpoint available
-        if check_file_existence(PATH['saved_model']):
+        if check_exist(PATH['saved_model']):
             logging.info("=> Saved model instance existed. Load it.")
 
             states  = self.load_checkpoint()

@@ -43,24 +43,24 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         H_q = self.linearIAL(H_q)
         H_c = self.linearIAL(H_c)
         # H_q: [batch, seq_len_ques, d_hid]
-        # H_c: [batch, seq_len_context, d_hid]
+        # H_c: [batch, seq_len_contx, d_hid]
 
         E   = torch.bmm(H_c, transpose(H_q))
-        # E: [batch, seq_len_context, seq_len_ques]
+        # E: [batch, seq_len_contx, seq_len_ques]
         A   = torch.bmm(torch_f.softmax(E, dim=1), H_q)
-        # A: [batch, seq_len_context, d_hid]
+        # A: [batch, seq_len_contx, d_hid]
 
         # Reasoning over alignments
         tmp = torch.cat((A, H_c, A - H_c, A * H_c), dim=-1)
-        # tmp: [batch, seq_len_context, 4*d_hid]
+        # tmp: [batch, seq_len_contx, 4*d_hid]
         G   = self.linearReason(tmp)
-        # G: [batch, seq_len_context, d_hid]
+        # G: [batch, seq_len_contx, d_hid]
 
-        # result  = torch.zeros((batch, seq_len_context, seq_len_context)).to(args.device)
+        # result  = torch.zeros((batch, seq_len_contx, seq_len_contx)).to(args.device)
 
         # for b in range(batch):
-        #     for i in range(seq_len_context):
-        #         for j in range(seq_len_context):
+        #     for i in range(seq_len_contx):
+        #         for j in range(seq_len_contx):
         #             if abs(i - j) <= Block:
         #                 result[b, i, j] = torch.matmul(G[b, i, :], G[b, j, :])
         # G = result
@@ -72,11 +72,11 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
 
         # Local BLock-based Self-Attention
         B = torch.bmm(torch_f.softmax(G, dim=1), tmp)
-        # B: [batch, seq_len_context, 4*d_hid]
+        # B: [batch, seq_len_contx, 4*d_hid]
 
         Y = torch.cat((B, tmp), dim=-1)
-        # Y: [batch, seq_len_context, 8*d_hid]
+        # Y: [batch, seq_len_contx, 8*d_hid]
         Y = self.biLSTM_attn(Y)[0]
-        # Y: [batch, seq_len_context, 2*d_hid]
+        # Y: [batch, seq_len_contx, 2*d_hid]
 
         return Y
