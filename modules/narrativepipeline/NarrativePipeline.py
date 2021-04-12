@@ -35,14 +35,14 @@ class  NarrativePipeline(torch_nn.Module):
         H_q = self.embd_layer(ques)
         H_c = self.embd_layer(contx)
         # H_q   : [batch, seq_len_ques, d_hid]
-        # H_c   : [batch, seq_len_contex, d_hid]
+        # H_c   : [batch, seq_len_contx, d_hid]
 
 
         ####################
         # Do reasoning with IAL
         ####################
         Y       = self.reasoning(H_q, H_c)
-        # Y: [batch, seq_len_context, 2*d_hid]
+        # Y: [batch, seq_len_contx, 2*d_hid]
 
 
         ####################
