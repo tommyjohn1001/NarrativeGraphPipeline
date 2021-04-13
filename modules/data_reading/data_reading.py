@@ -212,8 +212,8 @@ class DataReading():
         return paras.tolist()
 
 
-    def f_process_contx(self, keys, queue, *args):
-        processed_contx = args[0]
+    def f_process_contx(self, keys, queue, arg):
+        processed_contx = arg[0]
         for key in keys:
             context, kind, start, end = processed_contx[key]
 
@@ -256,14 +256,14 @@ class DataReading():
         for ith, score in enumerate(scores):
             if score > 0:
                 goldens.add(ith)
-                if len(goldens) == args.n_paras:
+                if len(goldens) >= args.n_paras:
                     break
 
         if len(goldens) < args.n_paras:
             for ith, score in enumerate(scores):
                 if score == 0:
                     goldens.add(ith)
-                    if len(goldens) == args.n_paras:
+                    if len(goldens) >= args.n_paras:
                         break
 
         return goldens

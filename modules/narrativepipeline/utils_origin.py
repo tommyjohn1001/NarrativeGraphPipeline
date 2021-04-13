@@ -7,7 +7,6 @@ from torch.utils.data import Dataset
 from torchtext.vocab import Vectors
 import torch
 from datasets import load_dataset
-from bs4 import BeautifulSoup
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
@@ -63,13 +62,17 @@ class CustomDataset(Dataset):
         self.vocab  = Vocab(path_vocab)
 
         self.ques           = None
+        self.ques_len       = None
         self.ans1           = None
         self.ans2           = None
+        self.ans1_len       = None
+        self.ans2_len       = None
         self.ans1_mask      = None
         self.ans2_mask      = None
         self.ans1_tok_idx   = None
         self.ans2_tok_idx   = None
         self.contx          = None
+        self.contx_len      = None
 
         self.n_exchange     = 0
 
@@ -81,19 +84,23 @@ class CustomDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
+
         return {
             'ques'          : self.ques[idx],
+            'ques_len'      : self.ques_len[idx],
             'contx'         : self.contx[idx],
+            'contx_len'     : self.contx_len[idx],
             'ans1'          : self.ans1[idx],
             'ans2'          : self.ans2[idx],
+            'ans1_len'      : self.ans1_len[idx],
+            'ans2_len'      : self.ans2_len[idx],
             'ans1_mask'     : self.ans1_mask[idx],
             'ans2_mask'     : self.ans2_mask[idx],
             'ans1_tok_idx'  : self.ans1_tok_idx[idx],
             'ans2_tok_idx'  : self.ans2_tok_idx[idx]
-            # 'ans1_text'     : self.ans1_text[idx]
         }
 
-    def f_process_file(self, entries, queue, *args):
+    def f_process_file(self, entries, queue, arg):
         for entry in entries.itertuples():
 
             ###########################
@@ -133,14 +140,12 @@ class CustomDataset(Dataset):
             En      = ast.literal_eval(entry.En)
             Hn      = ast.literal_eval(entry.Hn)
 
-            contx = En[self.n_exchange:] + Hn[:self.n_exchange]
+            contx = En[self.n_exchange:args.n_paras] + Hn[:self.n_exchange]
 
             # Process context
-
-            # Remove HTML tag
-            contx = BeautifulSoup(' '.join(contx), 'html.parser').get_text()
-            # Tokenize context
-            contx = [tok.text for tok in nlp(contx)]
+            contx = ' '.join(contx).split(' ')
+            if len(contx) > 2000:
+                print(entry.doc_id)
 
             # Pad context
             contx, contx_len    = pad(contx, SEQ_LEN_CONTEXT)
@@ -168,13 +173,17 @@ class CustomDataset(Dataset):
         df  = pd.read_csv(path_file, index_col=None, header=0)
 
         self.ques           = []
+        self.ques_len       = []
         self.ans1           = []
         self.ans2           = []
+        self.ans1_len       = []
+        self.ans2_len       = []
         self.ans1_mask      = []
         self.ans2_mask      = []
         self.ans1_tok_idx   = []
         self.ans2_tok_idx   = []
         self.contx          = []
+        self.contx_len      = []
 
         gc.collect()
 
@@ -190,13 +199,17 @@ class CustomDataset(Dataset):
 
         for entry in entries:
             self.ques.append(entry['ques'])
+            self.ques_len.append(entry['ques_len'])
             self.ans1.append(entry['ans1'])
             self.ans2.append(entry['ans2'])
+            self.ans1_len.append(entry['ans1_len'])
+            self.ans2_len.append(entry['ans2_len'])
             self.ans1_mask.append(entry['ans1_mask'])
             self.ans2_mask.append(entry['ans2_mask'])
             self.ans1_tok_idx.append(entry['ans1_tok_idx'])
             self.ans2_tok_idx.append(entry['ans2_tok_idx'])
             self.contx.append(entry['contx'])
+            self.contx_len.append(entry['contx_len'])
 
     def switch_answerability(self):
         self.n_exchange += 1
