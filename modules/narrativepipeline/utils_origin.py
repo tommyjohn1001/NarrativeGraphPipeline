@@ -93,7 +93,7 @@ class CustomDataset(Dataset):
             # 'ans1_text'     : self.ans1_text[idx]
         }
 
-    def f_process_file(self, entries, queue):
+    def f_process_file(self, entries, queue, *args):
         for entry in entries.itertuples():
 
             ###########################

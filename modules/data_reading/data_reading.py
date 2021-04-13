@@ -66,7 +66,8 @@ class DataReading():
         # NOTE: remove the following and use the line of code commented after this piece of code
         para_   = []
         for i in range(0, len(toks), args.seq_len_para):
-            para_.append(re.sub(r'( {2,}|\t)', ' ', ' '.join(toks[i:i+args.seq_len_para])).strip())
+            tmp = re.sub(r'( |\t){2,}', ' ', ' '.join(toks[i:i+args.seq_len_para])).strip()
+            para_.append(tmp)
 
         return np.array(para_)
 
@@ -211,7 +212,7 @@ class DataReading():
         return paras.tolist()
 
 
-    def f_process_contx(self, keys, queue, args):
+    def f_process_contx(self, keys, queue, *args):
         processed_contx = args[0]
         for key in keys:
             context, kind, start, end = processed_contx[key]
@@ -395,5 +396,5 @@ class DataReading():
 if __name__ == '__main__':
     logging.info("* Reading raw data and decompose into paragraphs")
 
-    for splt in ['test']:
+    for splt in ['test', 'train', 'validation']:
         DataReading(splt).trigger_reading_data()
