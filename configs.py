@@ -53,6 +53,9 @@ args.d_vocab            = 27175     # Vocab size
 args.dropout            = 0.2
 args.n_layers           = 5
 
+args.graph_d_project    = 2048
+args.n_nodes            = 50
+
 
 ###############################
 # Config logging

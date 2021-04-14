@@ -143,7 +143,7 @@ cython_debug/
 *.dump
 
 # Redundant folders
-testing/
+tests/
 .vscode
 backup*
 cmd_for_tessera.sh
