@@ -8,24 +8,24 @@ from transformers import AdamW
 
 
 from modules.narrativepipeline.utils_origin import CustomDataset, build_vocab_PGD, Vocab
-from modules.pg_decoder.PointerGeneratorDecoder import PointerGeneratorDecoder
+from modules.ans_infer.PointerGeneratorDecoder import PointerGeneratorDecoder
 from modules.utils import EmbeddingLayer, check_exist, transpose, get_scores
 from modules.Reasoning.IAL import IntrospectiveAlignmentLayer
 from configs import args, logging, PATH
 
 class  NarrativePipeline(torch_nn.Module):
-    def __init__(self):
+    def __init__(self, vocab):
         super().__init__()
 
         self.embd_layer = EmbeddingLayer()
         self.reasoning  = IntrospectiveAlignmentLayer()
-        self.pg_decoder = PointerGeneratorDecoder()
+        self.ans_infer  = PointerGeneratorDecoder(vocab)
 
     def forward(self, ques, contx, ans, ans_mask):
         # ques      : [batch, seq_len_ques, d_embd]
         # contx     : [batch, seq_len_contx, d_embd]
-        # ans       : [batch, max_len_ans, d_embd]
-        # ans_mask  : [batch, max_len_ans]
+        # ans       : [batch, seq_len_ans, d_embd]
+        # ans_mask  : [batch, seq_len_ans]
         # NOTE: all arguments used in this method must not modify the orginal
 
         ####################
@@ -48,8 +48,8 @@ class  NarrativePipeline(torch_nn.Module):
         ####################
         # Generate answer with PGD
         ####################
-        pred    = self.pg_decoder(Y, H_q, ans, ans_mask)
-        # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
+        pred    = self.ans_infer(Y, H_q, ans, ans_mask)
+        # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
 
         return pred
 
@@ -138,9 +138,9 @@ class Trainer():
                 optimizer.zero_grad()
 
                 pred        = model(ques, contx, ans, ans_mask)
-                # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
+                # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
                 pred        = transpose(pred)
-                # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
+                # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
                 loss        = criterion(pred, ans_tok_idx)
 
                 loss.backward()
@@ -177,9 +177,9 @@ class Trainer():
                     ans_tok_idx = batch['ans1_tok_idx'].to(args.device)
 
                     pred        = model(ques, contx, ans, ans_mask)
-                    # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
+                    # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
                     pred        = transpose(pred)
-                    # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
+                    # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
                     loss        = criterion(pred, ans_tok_idx)
 
                     loss_test += loss.detach().item()
@@ -203,7 +203,7 @@ class Trainer():
         ###############################
         # Defind model and associated stuffs
         ###############################
-        model       = NarrativePipeline().to(args.device)
+        model       = NarrativePipeline(self.vocab).to(args.device)
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
         criterion   = torch_nn.CrossEntropyLoss()
 
@@ -251,11 +251,11 @@ class Trainer():
             pred (tensor): predicted tensor
             ans_tok_idx (tensor): target answer
         """
-        # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
-        # ans_tok_idx: [batch, max_len_ans]
+        # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
+        # ans_tok_idx: [batch, seq_len_ans]
 
         pred_   = torch.argmax(torch_f.log_softmax(pred, 1), 1)
-        # pred_: [batch, max_len_ans]
+        # pred_: [batch, seq_len_ans]
 
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
 
@@ -316,9 +316,9 @@ class Trainer():
                     ans_tok_idx = batch['ans1_tok_idx'].to(args.device)
 
                     pred        = model(ques, contx, ans, ans_mask)
-                    # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
+                    # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
                     pred        = transpose(pred)
-                    # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
+                    # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
                     loss        = criterion(pred, ans_tok_idx)
 
                     # Calculate loss

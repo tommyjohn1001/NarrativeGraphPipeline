@@ -34,7 +34,10 @@ def pad(l, max_len):
     return l + [PAD]*(max_len - len(l))
 
 class Vocab:
-    def __init__(self, path_vocab) -> None:
+    def __init__(self, path_vocab=None) -> None:
+        if path_vocab is None:
+            path_vocab  =PATH['vocab_PGD']
+
         self.stoi   = dict()
         self.itos   = dict()
 
@@ -53,6 +56,7 @@ class Vocab:
 
     def __len__(self):
         return len(self.stoi)
+
 
 class CustomDataset(Dataset):
     def __init__(self, path_csv_dir, path_vocab):
