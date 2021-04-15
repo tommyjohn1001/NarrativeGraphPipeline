@@ -7,7 +7,6 @@ from torch.utils.data import Dataset
 from torchtext.vocab import Vectors
 import torch
 from datasets import load_dataset
-from bs4 import BeautifulSoup
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
@@ -19,9 +18,6 @@ from configs import logging, args, PATH
 
 SEQ_LEN_CONTEXT = args.seq_len_para * args.n_paras
 
-nlp         = spacy.load("en_core_web_sm", disable=['ner', 'parser', 'tagger', "lemmatizer"])
-glove_embd  = Vectors("glove.6B.200d.txt", cache=".vector_cache/",
-                      url="http://downloads.cs.stanford.edu/nlp/data/glove.6B.zip")
 
 PAD = "[PAD]"
 CLS = "[CLS]"
@@ -31,7 +27,7 @@ SEP = "[SEP]"
 special_toks = set([PAD, CLS, UNK, SEP])
 
 def pad(l, max_len):
-    return l + [PAD]*(max_len - len(l))
+    return l + [PAD]*(max_len - len(l)), len(l)
 
 class Vocab:
     def __init__(self, path_vocab=None) -> None:
@@ -63,17 +59,23 @@ class CustomDataset(Dataset):
         # Search for available data file within directory
         self.file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
 
+        self.glove_embd = Vectors("glove.6B.200d.txt", cache=".vector_cache/")
+
         # Read vocab
         self.vocab  = Vocab(path_vocab)
 
         self.ques           = None
+        self.ques_len       = None
         self.ans1           = None
         self.ans2           = None
+        self.ans1_len       = None
+        self.ans2_len       = None
         self.ans1_mask      = None
         self.ans2_mask      = None
         self.ans1_tok_idx   = None
         self.ans2_tok_idx   = None
         self.contx          = None
+        self.contx_len      = None
 
         self.n_exchange     = 0
 
@@ -85,51 +87,56 @@ class CustomDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
+
         return {
             'ques'          : self.ques[idx],
+            'ques_len'      : self.ques_len[idx],
             'contx'         : self.contx[idx],
+            'contx_len'     : self.contx_len[idx],
             'ans1'          : self.ans1[idx],
             'ans2'          : self.ans2[idx],
+            'ans1_len'      : self.ans1_len[idx],
+            'ans2_len'      : self.ans2_len[idx],
             'ans1_mask'     : self.ans1_mask[idx],
             'ans2_mask'     : self.ans2_mask[idx],
             'ans1_tok_idx'  : self.ans1_tok_idx[idx],
             'ans2_tok_idx'  : self.ans2_tok_idx[idx]
-            # 'ans1_text'     : self.ans1_text[idx]
         }
 
-    def f_process_file(self, entries, queue):
+    def f_process_file(self, entries, queue, arg):
+        glove_embd  = arg[0]
+
         for entry in entries.itertuples():
 
             ###########################
             # Process question
             ###########################
-            question    = pad(entry.question.split(' '), args.seq_len_ques)
-            question    = glove_embd.get_vecs_by_tokens(question).numpy()
+            ques, ques_len  = pad(entry.question.split(' '), args.seq_len_ques)
+            ques            = glove_embd.get_vecs_by_tokens(ques).numpy()
 
 
             ###########################
             # Process answers including mask token id and embedding form
             ###########################
-            answers     = ast.literal_eval(entry.answers)
-            answer1     = answers[0].split(' ')
-            answer2     = answers[1].split(' ')
+            answers         = ast.literal_eval(entry.answers)
+            ans1, ans2      = answers[0].split(' '), answers[1].split(' ')
 
 
-            answer1_mask    = np.array([1]*len(answer1) +\
-                                [0]*(args.seq_len_ans - len(answer1)), dtype=np.float)
-            answer2_mask    = np.array([1]*len(answer2) +\
-                                [0]*(args.seq_len_ans - len(answer2)), dtype=np.float)
+            ans1_mask       = np.array([1]*len(ans1) +\
+                                       [0]*(args.seq_len_ans - len(ans1)), dtype=np.float)
+            ans2_mask       = np.array([1]*len(ans2) +\
+                                       [0]*(args.seq_len_ans - len(ans2)), dtype=np.float)
 
-            answer1         = pad(answer1, args.seq_len_ans)
-            answer2         = pad(answer2, args.seq_len_ans)
+            ans1, ans1_len  = pad(ans1, args.seq_len_ans)
+            ans2, ans2_len  = pad(ans2, args.seq_len_ans)
 
-            answer1_tok_idx = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
-                                for w in answer1], dtype=np.long)
-            answer2_tok_idx = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
-                                for w in answer2], dtype=np.long)
+            ans1_tok_idx    = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
+                                        for w in ans1], dtype=np.long)
+            ans2_tok_idx    = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w] 
+                                        for w in ans2], dtype=np.long)
 
-            answer1 = glove_embd.get_vecs_by_tokens(answer1).numpy()
-            answer2 = glove_embd.get_vecs_by_tokens(answer2).numpy()
+            ans1 = glove_embd.get_vecs_by_tokens(ans1).numpy()
+            ans2 = glove_embd.get_vecs_by_tokens(ans2).numpy()
 
 
             ###########################
@@ -138,44 +145,49 @@ class CustomDataset(Dataset):
             En      = ast.literal_eval(entry.En)
             Hn      = ast.literal_eval(entry.Hn)
 
-            context = En[self.n_exchange:] + Hn[:self.n_exchange]
+            contx = En[self.n_exchange:args.n_paras] + Hn[:self.n_exchange]
 
             # Process context
-
-            # Remove HTML tag
-            context = BeautifulSoup(' '.join(context), 'html.parser').get_text()
-            # Tokenize context
-            context = [tok.text for tok in nlp(context)]
+            contx = ' '.join(contx).split(' ')
 
             # Pad context
-            context = pad(context, SEQ_LEN_CONTEXT)
+            contx, contx_len    = pad(contx, SEQ_LEN_CONTEXT)
             # Embed context by GloVe
-            context = glove_embd.get_vecs_by_tokens(context).numpy()
+            contx = glove_embd.get_vecs_by_tokens(contx).numpy()
 
             # context: [SEQ_LEN_CONTEXT = 1600, d_embd = 200]
 
             queue.put({
-                'ques'          : question,
-                'ans1'          : answer1,
-                'ans2'          : answer2,
-                'ans1_mask'     : answer1_mask,
-                'ans2_mask'     : answer2_mask,
-                'ans1_tok_idx'  : answer1_tok_idx,
-                'ans2_tok_idx'  : answer2_tok_idx,
-                'contx'         : context
+                'ques'          : ques,
+                'ques_len'      : ques_len,
+                'ans1'          : ans1,
+                'ans2'          : ans2,
+                'ans1_len'      : ans1_len,
+                'ans2_len'      : ans2_len,
+                'ans1_mask'     : ans1_mask,
+                'ans2_mask'     : ans2_mask,
+                'ans1_tok_idx'  : ans1_tok_idx,
+                'ans2_tok_idx'  : ans2_tok_idx,
+                'contx'         : contx,
+                'contx_len'     : contx_len
             })
 
     def read_shard(self, path_file):
         df  = pd.read_csv(path_file, index_col=None, header=0)
+        
 
         self.ques           = []
+        self.ques_len       = []
         self.ans1           = []
         self.ans2           = []
+        self.ans1_len       = []
+        self.ans2_len       = []
         self.ans1_mask      = []
         self.ans2_mask      = []
         self.ans1_tok_idx   = []
         self.ans2_tok_idx   = []
         self.contx          = []
+        self.contx_len      = []
 
         gc.collect()
 
@@ -183,21 +195,25 @@ class CustomDataset(Dataset):
         # Fill self.ques, self.ans1,  self.ans2,
         # answers' mask and index
         ######################
-        entries = ParallelHelper(self.f_process_file, df, num_proc=args.num_proc,
-                                 data_allocation=lambda dat, l, h: dat.iloc[l:h]).launch()
+        entries = ParallelHelper(self.f_process_file, df, lambda dat, l, h: dat.iloc[l:h],
+                                 args.num_proc, self.glove_embd).launch()
         # with Pool(args.num_proc) as pool:
         #     entries = list(tqdm(pool.imap(f_process_file, zip(df.to_dict(orient='records'), repeat(self.vocab), repeat(self.n_exchange))),
                                 # desc="", total=len(df)))
 
         for entry in entries:
             self.ques.append(entry['ques'])
+            self.ques_len.append(entry['ques_len'])
             self.ans1.append(entry['ans1'])
             self.ans2.append(entry['ans2'])
+            self.ans1_len.append(entry['ans1_len'])
+            self.ans2_len.append(entry['ans2_len'])
             self.ans1_mask.append(entry['ans1_mask'])
             self.ans2_mask.append(entry['ans2_mask'])
             self.ans1_tok_idx.append(entry['ans1_tok_idx'])
             self.ans2_tok_idx.append(entry['ans2_tok_idx'])
             self.contx.append(entry['contx'])
+            self.contx_len.append(entry['contx_len'])
 
     def switch_answerability(self):
         self.n_exchange += 1

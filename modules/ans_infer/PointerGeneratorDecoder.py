@@ -69,11 +69,12 @@ class PointerGeneratorDecoder(torch_nn.Module):
 
         return mask
 
-    def forward(self, Y, H_q, ans, ans_mask):
-        # Y         : [batch, seq_len_cntx, d_hid * 2]
-        # H_q       : [batch, seq_len_ques, d_hid]
-        # ans       : [batch, seq_len_ans, d_embd]
-        # ans_mask  : [batch, seq_len_ans]
+    def forward(self, Y, H_q, ans, ans_len, ans_mask):
+        # Y         : [b, seq_len_contx, d_hid * 2]
+        # H_q       : [b, seq_len_ques, d_hid]
+        # ans       : [b, max_len_ans, d_embd]
+        # ans_len   : [b]
+        # ans_mask  : [b, max_len_ans]
 
         batch   = Y.shape[0]
 
@@ -124,7 +125,7 @@ class PointerGeneratorDecoder(torch_nn.Module):
         Y_      = F_a(Y)
         H_q     = F_q(H_q)
 
-        ans_    = self.embedding(ans)
+        ans_    = self.embedding(ans, ans_len)
         # ans_: [batch, max_len_ans, d_hid_PGD]
 
         # CLS is used to initialize LSTM

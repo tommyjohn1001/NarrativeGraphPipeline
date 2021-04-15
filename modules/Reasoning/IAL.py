@@ -12,11 +12,10 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         super().__init__()
 
         self.d_hid          = d_hid
+        self.batch          = args.batch
+        self.seq_len_contx  = args.seq_len_para * args.n_paras
 
 
-
-        self.biLSTM_emb     = torch_nn.LSTM(d_emb, d_hid//2, num_layers=5,
-                                           batch_first=True, bidirectional=True)
 
         self.linearIAL      = NonLinear(d_hid, d_hid)
 
@@ -25,14 +24,13 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         self.biLSTM_attn    = torch_nn.LSTM(8*d_hid, d_hid, num_layers=5,
                                            batch_first=True, bidirectional=True)
 
-        batch           = args.batch
-        seq_len_contx   = args.seq_len_para * args.n_paras
-        self.mask       = torch.zeros((1, seq_len_contx, seq_len_contx))
-        for i in range(seq_len_contx):
-            for j in range(seq_len_contx):
+
+        self.mask           = torch.zeros((1, self.seq_len_contx, self.seq_len_contx))
+        for i in range(self.seq_len_contx):
+            for j in range(self.seq_len_contx):
                 if abs(i - j) <= Block:
                     self.mask[0,i,j] = 1
-        self.mask       = self.mask.repeat((batch, 1, 1)).to(args.device)
+        self.mask           = self.mask.repeat((self.batch, 1, 1)).to(args.device)
 
     def forward(self, H_q, H_c):
         # H_q   : [batch, seq_len_ques, d_hid]
@@ -43,6 +41,12 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         H_q = self.linearIAL(H_q)
         H_c = self.linearIAL(H_c)
         # H_q: [batch, seq_len_ques, d_hid]
+        # H_c: [batch, x, d_hid]
+
+        # Pad dim 1 of H_c
+        pad_zeros = torch.zeros((H_c.shape[0], self.seq_len_contx - H_c.shape[1], self.d_hid)).to(args.device)
+        H_c = torch.cat((H_c, pad_zeros), dim=1)
+
         # H_c: [batch, seq_len_contx, d_hid]
 
         E   = torch.bmm(H_c, transpose(H_q))
@@ -56,14 +60,6 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         G   = self.linearReason(tmp)
         # G: [batch, seq_len_contx, d_hid]
 
-        # result  = torch.zeros((batch, seq_len_contx, seq_len_contx)).to(args.device)
-
-        # for b in range(batch):
-        #     for i in range(seq_len_contx):
-        #         for j in range(seq_len_contx):
-        #             if abs(i - j) <= Block:
-        #                 result[b, i, j] = torch.matmul(G[b, i, :], G[b, j, :])
-        # G = result
 
         G   = torch.bmm(G, transpose(G))
 

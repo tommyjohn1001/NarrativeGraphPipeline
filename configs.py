@@ -42,7 +42,7 @@ else:
 args.multi_gpus = torch.cuda.device_count() > 0
 
 args.seq_len_ques       = 40
-args.seq_len_para       = 40
+args.seq_len_para       = 50
 args.seq_len_ans        = 40        # maximum answer length of dataset
 args.n_paras            = 40
 args.d_embd             = 200
