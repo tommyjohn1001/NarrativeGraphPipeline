@@ -44,7 +44,7 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         # H_c: [batch, x, d_hid]
 
         # Pad dim 1 of H_c
-        pad_zeros = torch.zeros((self.batch, self.seq_len_contx - H_c.shape[1], self.d_hid)).to(args.device)
+        pad_zeros = torch.zeros((H_c.shape[0], self.seq_len_contx - H_c.shape[1], self.d_hid)).to(args.device)
         H_c = torch.cat((H_c, pad_zeros), dim=1)
 
         # H_c: [batch, seq_len_contx, d_hid]

@@ -122,7 +122,7 @@ class DataReading():
         for sent in sentences:
             ## Tokenize, remove stopword
             sent_   = [tok.text for tok in nlp(sent)
-                        if not (tok.is_stop or tok.is_punct)]
+                       if not (tok.is_stop or tok.is_punct)]
 
             ## Concat sentece if not exceed paragraph max len
             if n_tok + len(sent_) < args.seq_len_para:
@@ -163,7 +163,7 @@ class DataReading():
         for sent in sentences:
             ## Tokenize, remove stopword
             sent_   = [tok.text for tok in nlp(sent)
-                    if not (tok.is_stop or tok.is_punct)]
+                       if not (tok.is_stop or tok.is_punct)]
 
             if len(sent_) > args.seq_len_para:
                 # Long paragraph: split into sentences and
@@ -179,7 +179,7 @@ class DataReading():
                 # apply concatenating strategy
                 for sub_sent in nlp(sent).sents:
                     sent_   = [tok.text for tok in sub_sent
-                            if not (tok.is_stop or tok.is_punct)]
+                               if not (tok.is_stop or tok.is_punct)]
 
                     if n_tok + len(sent_) < args.seq_len_para:
                         n_tok   += len(sent_)

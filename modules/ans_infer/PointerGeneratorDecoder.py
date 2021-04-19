@@ -2,16 +2,18 @@
 import torch.nn as torch_nn
 import torch
 
-from modules.utils import NonLinear, EmbeddingLayer, transpose
-from modules.pg_decoder.utils import *
+from modules.finegrained.Embedding import EmbeddingLayer
+from modules.utils import NonLinear, transpose
+from modules.ans_infer.utils import *
 from configs import args
 
 
 class PointerGeneratorDecoder(torch_nn.Module):
-    def __init__(self):
+    def __init__(self, vocab):
         super().__init__()
 
-        self.batch          = args.batch
+        self.SEP_indx       = vocab.stoi['[SEP]']
+
         self.d_hid          = args.d_hid
         self.d_hid_PGD      = self.d_hid * 2
         self.d_vocab        = args.d_vocab
@@ -40,6 +42,33 @@ class PointerGeneratorDecoder(torch_nn.Module):
         self.linear_ph1     = torch_nn.Linear(self.d_hid_PGD, 1, bias=False)
         self.linear_ph2     = torch_nn.Linear(self.n_layers, 1, bias=False)
         self.linear_py      = torch_nn.Linear(self.d_hid_PGD, 1)
+
+
+    def get_mask_sep(self, pred):
+        # X : [b, max_len_ans, d_vocab + seq_len_cntx]
+
+        batch   = pred.shape[0]
+
+        indx = torch.argmax(pred, dim=2)
+        # [b, max_len_ans]
+
+
+        SEP_indices = []
+        for b in range(batch):
+            for i in range(indx.shape[1]):
+                if indx[b, i].item() == self.SEP_indx:
+                    break
+            SEP_indices.append(i)
+
+        mask = []
+        for b in range(batch):
+            mask.append(torch.Tensor([1]*(SEP_indices[b]+1) +
+                                    [0]*(self.max_len_ans - SEP_indices[b] - 1)).unsqueeze(0))
+
+        mask = torch.vstack(mask).to(args.device)
+        mask = mask.unsqueeze(-1).repeat(1, 1, self.d_vocab + self.seq_len_cntx)
+
+        return mask
 
     def forward(self, Y, H_q, ans, ans_len, ans_mask):
         # Y         : [b, seq_len_contx, d_hid * 2]
@@ -98,11 +127,7 @@ class PointerGeneratorDecoder(torch_nn.Module):
         H_q     = F_q(H_q)
 
         ans_    = self.embedding(ans, ans_len)
-        # ans_: [batch, x, d_hid_PGD]
-
-        # Pad dim 1 of ans_w
-        pad_zeros = torch.zeros((self.batch, self.max_len_ans - ans_.shape[1], self.d_hid_PGD)).to(args.device)
-        ans_      = torch.cat((ans_, pad_zeros), dim=1)
+        # ans_: [batch, max_len_ans, d_hid_PGD]
 
         # CLS is used to initialize LSTM
         cls_tok = torch.zeros((batch, 1, self.d_hid_PGD)).to(args.device)
@@ -179,9 +204,28 @@ class PointerGeneratorDecoder(torch_nn.Module):
 
             pred[:, t, :]   = w_t
 
-        ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab + self.seq_len_contx)
-        # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
-        pred    = pred * ans_mask
 
-        # pred: [batch, max_len_ans, d_vocab + seq_len_contx]
+        ########################
+        # Pad 2nd dim of 'pred' from
+        # max_len_ans to seq_len_ans
+        ########################
+        pad     = torch.zeros((batch, args.seq_len_ans - self.max_len_ans,
+                               self.d_vocab + self.seq_len_cntx))
+        pred    = torch.cat((pred, pad), dim=1)
+
+        ########################
+        # Multiply 'pred' with 2 masks
+        ########################
+        ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab + self.seq_len_cntx)
+        # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
+
+        pred    = pred * ans_mask
+        # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
+
+        # Multiply 'pred' with mask SEP
+        sep_mask = self.get_mask_sep(pred)
+        pred    = pred * sep_mask
+        # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
+
+
         return pred

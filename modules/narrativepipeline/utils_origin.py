@@ -18,9 +18,6 @@ from configs import logging, args, PATH
 
 SEQ_LEN_CONTEXT = args.seq_len_para * args.n_paras
 
-nlp         = spacy.load("en_core_web_sm", disable=['ner', 'parser', 'tagger', "lemmatizer"])
-glove_embd  = Vectors("glove.6B.200d.txt", cache=".vector_cache/",
-                      url="http://downloads.cs.stanford.edu/nlp/data/glove.6B.zip")
 
 PAD = "[PAD]"
 CLS = "[CLS]"
@@ -33,7 +30,10 @@ def pad(l, max_len):
     return l + [PAD]*(max_len - len(l)), len(l)
 
 class Vocab:
-    def __init__(self, path_vocab) -> None:
+    def __init__(self, path_vocab=None) -> None:
+        if path_vocab is None:
+            path_vocab  = PATH['vocab_PGD']
+
         self.stoi   = dict()
         self.itos   = dict()
 
@@ -53,10 +53,13 @@ class Vocab:
     def __len__(self):
         return len(self.stoi)
 
+
 class CustomDataset(Dataset):
     def __init__(self, path_csv_dir, path_vocab):
         # Search for available data file within directory
         self.file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
+
+        self.glove_embd = Vectors("glove.6B.200d.txt", cache=".vector_cache/")
 
         # Read vocab
         self.vocab  = Vocab(path_vocab)
@@ -101,6 +104,8 @@ class CustomDataset(Dataset):
         }
 
     def f_process_file(self, entries, queue, arg):
+        glove_embd  = arg[0]
+
         for entry in entries.itertuples():
 
             ###########################
@@ -144,8 +149,6 @@ class CustomDataset(Dataset):
 
             # Process context
             contx = ' '.join(contx).split(' ')
-            if len(contx) > 2000:
-                print(entry.doc_id)
 
             # Pad context
             contx, contx_len    = pad(contx, SEQ_LEN_CONTEXT)
@@ -172,6 +175,7 @@ class CustomDataset(Dataset):
     def read_shard(self, path_file):
         df  = pd.read_csv(path_file, index_col=None, header=0)
 
+
         self.ques           = []
         self.ques_len       = []
         self.ans1           = []
@@ -191,8 +195,8 @@ class CustomDataset(Dataset):
         # Fill self.ques, self.ans1,  self.ans2,
         # answers' mask and index
         ######################
-        entries = ParallelHelper(self.f_process_file, df, num_proc=args.num_proc,
-                                 data_allocation=lambda dat, l, h: dat.iloc[l:h]).launch()
+        entries = ParallelHelper(self.f_process_file, df, lambda dat, l, h: dat.iloc[l:h],
+                                 args.num_proc, self.glove_embd).launch()
         # with Pool(args.num_proc) as pool:
         #     entries = list(tqdm(pool.imap(f_process_file, zip(df.to_dict(orient='records'), repeat(self.vocab), repeat(self.n_exchange))),
                                 # desc="", total=len(df)))

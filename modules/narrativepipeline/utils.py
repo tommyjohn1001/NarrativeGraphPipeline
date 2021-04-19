@@ -1,122 +1,158 @@
 '''This file contain modules for loading data and training procedure. Other component layers
 are in other directories.'''
+from typing import Tuple
+import glob, ast, gc
 
-import glob, ast
-
-import torch.nn. functional as torch_f
 from torch.utils.data import Dataset
-from transformers import BertTokenizer
-from bs4 import BeautifulSoup
-import pandas as pd
-import spacy
 import torch
+from transformers import BertTokenizer
+import pandas as pd
+import numpy as np
 
+from modules.utils import ParallelHelper
 from configs import args
 
-tokenizer   = BertTokenizer.from_pretrained(args.bert_model)
-nlp         = spacy.load("en_core_web_sm", disable=['ner', 'parser', 'tagger', "lemmatizer"])
+bert_tokenizer  = BertTokenizer.from_pretrained(args.bert_model)
+cls_id  = bert_tokenizer.cls_token_id
+sep_id  = bert_tokenizer.sep_token_id
+pad_id  = bert_tokenizer.pad_token_id
 
 
-# NOTE: This class is to create Dataset instance for training. This class belongs to my proposal pipeline.
 class CustomDataset(Dataset):
     def __init__(self, path_csv_dir):
-        file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
-        
-        dfs = []
-        for filename in file_names:
-            df = pd.read_csv(filename, index_col=None, header=0)
-            dfs.append(df)
+        self.file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
 
-        self.df = pd.concat(dfs, axis=0, ignore_index=True)
+        self.ques           = None
+        self.ques_mask      = None
+        self.contx          = None
+        self.contx_mask     = None
+        self.ans1           = None
+        self.ans2           = None
+        self.ans1_mask      = None
+        self.ans2_mask      = None
+        ## These for LSTM/GRU
+        self.ans1_len       = None
+        self.ans2_len       = None
+
+
+        self.n_exchange     = 0
 
 
     def __len__(self):
-        return len(self.df)
+        return len(self.ques)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        if isinstance(idx, int):
-            return self.cvt_tensor(self.df.iloc[idx])
+        return {
+            'ques'          : self.ques[idx],
+            'ques_mask'     : self.ques_mask[idx],
+            'contx'         : self.contx[idx],
+            'contx_mask'    : self.contx_mask[idx],
+            'ans1'          : self.ans1[idx],
+            'ans2'          : self.ans2[idx],
+            'ans1_len'      : self.ans1_len[idx],
+            'ans2_len'      : self.ans2_len[idx],
+            'ans1_mask'     : self.ans1_mask[idx],
+            'ans2_mask'     : self.ans2_mask[idx]
+        }
 
-        return [self.cvt_tensor(entry) for entry in self.df.iloc[idx].itertuples()]
+    def bert_service(self, sent: str, max_len: int) -> Tuple[np.array, np.array, int]:
+        ## Convert sent in str to tokens
+        sent        = sent.split(' ')
 
-    def cvt_tensor(self, entry):
+        ## convert tokens to id using BertTokenizer
+        tok_ids     = bert_tokenizer.convert_tokens_to_ids(sent)
+
+        ## Add CLS and SEP token
+        tok_ids     = [cls_id] + tok_ids + [sep_id]
+        len_        = len(tok_ids)
+
+        ## Create attention mask
+        attn_mask   = [1]*len_ + [0]*(max_len - len_)
+
+        ## Pad 'sent' to max len of paras
+        tok_ids     = tok_ids + [pad_id]*(max_len - len_)
+
+        return np.array(tok_ids), np.array(attn_mask), len_
+
+    def f_cvt_tensor(self, entries, queue, arg):
         """ Convert entry to tensors """
 
-        ## Process question: tokenize, pad and question mask
-        ques        = entry.question.split(' ')
-        ques        = torch.LongTensor(tokenizer.convert_tokens_to_ids(ques))
-        ques_mask   = torch.ones(ques.shape[0])
-
-        ques_mask   = torch_f.pad(ques_mask, (0, args.seq_len_ques - ques.shape[0]))
-        ques        = torch_f.pad(ques, (0, args.seq_len_ques - ques.shape[0]))
+        for entry in entries.itertuples():
+            ## Process question
+            ques, ques_mask, _  = self.bert_service(entry.question, args.seq_len_ques)
 
 
-        ## Process each paragraph in En: tokenize, pad, create mask
-        list_para_batch, list_para_mask_batch = [], []
-        paras   = ast.literal_eval(entry.En)
-        for para in paras:
-            para        = BeautifulSoup(para, 'html.parser').get_text()
-            para        = [tok.text for tok in nlp(para)]
+            ## Create context and process it
+            En          = ast.literal_eval(entry.En)
+            Hn          = ast.literal_eval(entry.Hn)
 
-            para_mask   = torch.ones(len(para))
-            para        = torch.LongTensor(tokenizer.convert_tokens_to_ids(para))
+            contx_      = En[self.n_exchange:args.n_paras] + Hn[:self.n_exchange]
+            contx, contx_mask  = [], []
+            for para in contx_:
+                para, para_mask, _= self.bert_service(para, args.seq_len_para)
 
-            para_mask   = torch_f.pad(para_mask, (0, args.seq_len_para - para.shape[0]))
-            para        = torch_f.pad(para, (0, args.seq_len_para - para.shape[0]))
+                contx.append(para)
+                contx_mask.append(para_mask)
 
-
-            list_para_batch.append(para)
-            list_para_mask_batch.append(para_mask)
-
-        para_En         = torch.vstack(list_para_batch).long()
-        para_En_mask    = torch.vstack(list_para_mask_batch).long()
-
-        para_En_mask    = torch_f.pad(para_En, (0, 0, 0, args.n_paras - para_En.shape[0]))
-        para_En         = torch_f.pad(para_En, (0, 0, 0, args.n_paras - para_En.shape[0]))
+            contx       = np.concatenate(contx)
+            contx_mask  = np.concatenate(contx_mask)
 
 
-        ## Process each paragraph in Hn: tokenize, pad, create mask
-        list_para_batch, list_para_mask_batch = [], []
-        paras   = ast.literal_eval(entry.En)
-        for para in paras:
-            para        = BeautifulSoup(para, 'html.parser').get_text()
-            para        = [tok.text for tok in nlp(para)]
-
-            para_mask   = torch.ones(len(para))
-            para        = torch.LongTensor(tokenizer.convert_tokens_to_ids(para))
-
-            para_mask   = torch_f.pad(para_mask, (0, args.seq_len_para - para.shape[0]))
-            para        = torch_f.pad(para, (0, args.seq_len_para - para.shape[0]))
+            ## Process answers
+            ans1, ans1_mask, ans1_len   = self.bert_service(entry.answers[0], args.seq_len_ans)
+            ans2, ans2_mask, ans2_len   = self.bert_service(entry.answers[1], args.seq_len_ans)
 
 
-            list_para_batch.append(para)
-            list_para_mask_batch.append(para_mask)
+            queue.put({
+                'ques'          : ques,
+                'ques_mask'     : ques_mask,
+                'contx'         : contx,
+                'contx_mask'    : contx_mask,
+                'ans1'          : ans1,
+                'ans2'          : ans2,
+                'ans1_len'      : ans1_len,
+                'ans2_len'      : ans2_len,
+                'ans1_mask'     : ans1_mask,
+                'ans2_mask'     : ans2_mask
+            })
 
-        para_Hn         = torch.vstack(list_para_batch).long()
-        para_Hn_mask    = torch.vstack(list_para_mask_batch).long()
+    def read_shard(self, path_file):
+        df  = pd.read_csv(path_file, index_col=None, header=0)
 
-        para_Hn_mask    = torch_f.pad(para_Hn, (0, 0, 0, args.n_paras - para_Hn.shape[0]))
-        para_Hn         = torch_f.pad(para_Hn, (0, 0, 0, args.n_paras - para_Hn.shape[0]))
+        self.ques           = []
+        self.ques_mask      = []
+        self.contx          = []
+        self.contx_mask     = []
+        self.ans1           = []
+        self.ans2           = []
+        self.ans1_len       = []
+        self.ans2_len       = []
+        self.ans1_mask      = []
+        self.ans2_mask      = []
+
+        gc.collect()
+
+        ######################
+        # Fill fields
+        ######################
+        entries = ParallelHelper(self.f_cvt_tensor, df, lambda dat, l, h: dat.iloc[l:h],
+                                 args.num_proc).launch()
+
+        for entry in entries:
+            self.ques.append(entry['ques'])
+            self.ques_mask.append(entry['ques_mask'])
+            self.contx.append(entry['contx'])
+            self.contx_mask.append(entry['contx_mask'])
+            self.ans1.append(entry['ans1'])
+            self.ans2.append(entry['ans2'])
+            self.ans1_len.append(entry['ans1_len'])
+            self.ans2_len.append(entry['ans2_len'])
+            self.ans1_mask.append(entry['ans1_mask'])
+            self.ans2_mask.append(entry['ans2_mask'])
 
 
-        ## Process answers
-        answer1 = tokenizer.convert_tokens_to_ids(entry.answers[0].split(' '))
-        answer2 = tokenizer.convert_tokens_to_ids(entry.answers[1].split(' '))
-
-        answer1 = torch_f.pad(torch.LongTensor(answer1), (0, args.seq_len_ans - len(answer1)))
-        answer2 = torch_f.pad(torch.LongTensor(answer2), (0, args.seq_len_ans - len(answer2)))
-
-
-        return {
-            'question'      : ques,
-            'question_mask' : ques_mask,
-            'para_En'       : para_En,
-            'para_En_mask'  : para_En_mask,
-            'para_Hn'       : para_Hn,
-            'para_Hn_mask'  : para_Hn_mask,
-            'answer1'       : answer1,
-            'answer2'       : answer2
-        }
+    def switch_answerability(self):
+        self.n_exchange += 1

@@ -11,7 +11,7 @@ import torch
 ###############################
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--batch", type=int, default=1)
+parser.add_argument("--batch", type=int, default=5)
 parser.add_argument("--num_proc", type=int, default=4, help="number of processes")
 parser.add_argument("--n_epochs", type=int, default=10)
 parser.add_argument("--bert_model", type=str, default="bert-base-uncased",
@@ -43,11 +43,11 @@ args.multi_gpus = torch.cuda.device_count() > 0
 
 args.seq_len_ques       = 40
 args.seq_len_para       = 50
-args.seq_len_ans        = 40
+args.seq_len_ans        = 40        # maximum answer length of dataset
 args.n_paras            = 40
 args.d_embd             = 200
 args.d_hid              = 256
-args.max_len_ans        = 40
+args.max_len_ans        = 12        # maximum inferring steps of decoder
 args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
 args.d_vocab            = 27175     # Vocab size
 args.dropout            = 0.2

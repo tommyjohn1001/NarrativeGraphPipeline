@@ -2,6 +2,9 @@
 
 ### This file contains changes and modifications during developing.
 
+## Apr 19 2021, 11:11
+- Update changes in *PGN* of branch *dev-proposal* to current branch
+
 ## Apr 6 2021, 14:45
 - Apply parallel processing and shared memory to *DataReading* module
 - Back up processed context file => speed up processing time
