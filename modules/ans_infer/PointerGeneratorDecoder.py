@@ -1,3 +1,5 @@
+from random import random
+import sys
 
 import torch.nn as torch_nn
 import torch
@@ -18,14 +20,14 @@ class PointerGeneratorDecoder(torch_nn.Module):
         self.d_hid_PGD      = self.d_hid * 2
         self.d_vocab        = args.d_vocab
         self.n_layers       = args.n_layers
-        self.seq_len_contx   = args.seq_len_para * args.n_paras
+        self.seq_len_cntx   = args.seq_len_para * args.n_paras
         self.max_len_ans    = args.max_len_ans
 
         self.embedding      = EmbeddingLayer(d_hid=self.d_hid_PGD)
 
         self.linear_q       = torch_nn.Linear(self.d_hid, self.d_hid_PGD)
         self.attn_pool_q    = AttentivePooling(self.d_hid_PGD)
-        self.linear_h1      = torch_nn.Linear(self.n_layers, self.seq_len_contx)
+        self.linear_h1      = torch_nn.Linear(self.n_layers, self.seq_len_cntx)
         self.linear_h2      = NonLinear(self.d_hid_PGD, self.d_hid_PGD)
         self.linear_y       = NonLinear(self.d_hid_PGD, self.d_hid_PGD)
 
@@ -45,12 +47,13 @@ class PointerGeneratorDecoder(torch_nn.Module):
 
 
     def get_mask_sep(self, pred):
-        # X : [b, max_len_ans, d_vocab + seq_len_cntx]
+        # X : [b, seq_len_ans, d_vocab + seq_len_cntx]
 
-        batch   = pred.shape[0]
+        batch, seq_len_ans, _ = pred.shape
+
 
         indx = torch.argmax(pred, dim=2)
-        # [b, max_len_ans]
+        # [b, seq_len_ans]
 
 
         SEP_indices = []
@@ -63,14 +66,14 @@ class PointerGeneratorDecoder(torch_nn.Module):
         mask = []
         for b in range(batch):
             mask.append(torch.Tensor([1]*(SEP_indices[b]+1) +
-                                    [0]*(self.max_len_ans - SEP_indices[b] - 1)).unsqueeze(0))
+                                     [0]*(seq_len_ans - SEP_indices[b] - 1)).unsqueeze(0))
 
         mask = torch.vstack(mask).to(args.device)
         mask = mask.unsqueeze(-1).repeat(1, 1, self.d_vocab + self.seq_len_cntx)
 
         return mask
 
-    def forward(self, Y, H_q, ans, ans_len, ans_mask):
+    def forward(self, Y, H_q, ans, ans_len, ans_mask, is_inferring=False):
         # Y         : [b, seq_len_contx, d_hid * 2]
         # H_q       : [b, seq_len_ques, d_hid]
         # ans       : [b, max_len_ans, d_embd]
@@ -98,7 +101,7 @@ class PointerGeneratorDecoder(torch_nn.Module):
             H_q = self.attn_pool_q(self.linear_q(H_q))
             # H_q: [batch, d_hid_PGD]
 
-            H_q = H_q.unsqueeze(1).expand(batch, self.seq_len_contx, self.d_hid_PGD)
+            H_q = H_q.unsqueeze(1).expand(batch, self.seq_len_cntx, self.d_hid_PGD)
             # H_q: [batch, seq_len_contx, d_hid_PGD]
 
             return H_q
@@ -127,15 +130,21 @@ class PointerGeneratorDecoder(torch_nn.Module):
         H_q     = F_q(H_q)
 
         ans_    = self.embedding(ans, ans_len)
+        # ans_: [batch, *, d_hid_PGD]
+        if ans_.shape[1] < self.max_len_ans:
+            pad     = torch.zeros((batch, self.max_len_ans - ans_.shape[1], self.d_hid_PGD)).to(args.device)
+            ans_    = torch.cat((ans_, pad), dim=1)
+        else:
+            ans_    = ans_[:, :self.max_len_ans, :]
         # ans_: [batch, max_len_ans, d_hid_PGD]
 
-        # CLS is used to initialize LSTM
+        # CLS is used to initialize LSTMclear
         cls_tok = torch.zeros((batch, 1, self.d_hid_PGD)).to(args.device)
 
         h_t     = torch.zeros((batch, self.n_layers, self.d_hid_PGD)).to(args.device)
         c_t     = torch.zeros((batch, self.n_layers, self.d_hid_PGD)).to(args.device)
 
-        pred    = torch.zeros((batch, self.max_len_ans, self.d_vocab + self.seq_len_contx)).to(args.device)
+        pred    = torch.zeros((batch, self.max_len_ans, self.d_vocab + self.seq_len_cntx)).to(args.device)
         # pred: [batch, max_len_ans, d_vocab + seq_len_contx]
 
         #################################
@@ -153,12 +162,16 @@ class PointerGeneratorDecoder(torch_nn.Module):
             # y_t: [batch, 1, d_hid_PGD]
 
             ###################
-            # Generate
+            # Generate using teacher forcing
             ###################
             if t == 0:
                 tmp = torch.cat((y_t, cls_tok), dim=2)
             else:
-                tmp = torch.cat((y_t, ans_[:,t-1,:].unsqueeze(1)), dim=2)
+                use_teacher_forcing = random() < 0.5
+                if not is_inferring and use_teacher_forcing:
+                    tmp = torch.cat((y_t, ans_[:,t-1,:].unsqueeze(1)), dim=2)
+                else:
+                    tmp = torch.cat((y_t, y_t), dim=2)
             # tmp: [batch, 1, d_hid_PGD * 2]
             _, (h_t, c_t)   = self.lstm(tmp.contiguous(), (h_t.transpose(0, 1).contiguous(),
                                               c_t.transpose(0, 1).contiguous()))
@@ -189,7 +202,7 @@ class PointerGeneratorDecoder(torch_nn.Module):
             a_t     = torch.cat((a_t.squeeze(-1), padding), 1).unsqueeze(-1)
             # a_t: [batch, d_vocab + seq_len_contx, 1]
 
-            padding = torch.zeros((batch, self.seq_len_contx)).to(args.device)
+            padding = torch.zeros((batch, self.seq_len_cntx)).to(args.device)
             v_t     = torch.cat((v_t, padding), 1).unsqueeze(-1)
             # v_t: [batch, d_vocab + seq_len_contx, 1]
 
@@ -210,17 +223,17 @@ class PointerGeneratorDecoder(torch_nn.Module):
         # max_len_ans to seq_len_ans
         ########################
         pad     = torch.zeros((batch, args.seq_len_ans - self.max_len_ans,
-                               self.d_vocab + self.seq_len_cntx))
+                               self.d_vocab + self.seq_len_cntx)).to(args.device)
         pred    = torch.cat((pred, pad), dim=1)
+        # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
 
         ########################
         # Multiply 'pred' with 2 masks
         ########################
-        ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab + self.seq_len_cntx)
         # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
-
+        ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab + self.seq_len_cntx)
         pred    = pred * ans_mask
-        # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
+        # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
 
         # Multiply 'pred' with mask SEP
         sep_mask = self.get_mask_sep(pred)
