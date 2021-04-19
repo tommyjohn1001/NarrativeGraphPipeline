@@ -2,7 +2,8 @@
 import torch.nn as torch_nn
 import torch
 
-from modules.utils import NonLinear, EmbeddingLayer, transpose
+from modules.finegrained.Embedding import EmbeddingLayer
+from modules.utils import NonLinear, transpose
 from modules.ans_infer.utils import *
 from configs import args
 

@@ -2,6 +2,8 @@
 
 ### This file contains changes and modifications during developing.
 
+## Apr 19 2021, 10:53
+- Change and reconstruct repo to fit with *GCN* setting
 
 ## Apr 6 2021, 14:45
 - Apply parallel processing and shared memory to *DataReading* module

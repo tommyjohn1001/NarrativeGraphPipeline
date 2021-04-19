@@ -9,8 +9,9 @@ from transformers import AdamW
 
 from modules.narrativepipeline.utils_origin import CustomDataset, build_vocab_PGD, Vocab
 from modules.ans_infer.PointerGeneratorDecoder import PointerGeneratorDecoder
-from modules.utils import EmbeddingLayer, check_exist, transpose, get_scores
+from modules.utils import check_exist, transpose, get_scores
 from modules.Reasoning.IAL import IntrospectiveAlignmentLayer
+from modules.finegrained.Embedding import EmbeddingLayer
 from configs import args, logging, PATH
 
 class  NarrativePipeline(torch_nn.Module):

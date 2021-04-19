@@ -174,7 +174,7 @@ class CustomDataset(Dataset):
 
     def read_shard(self, path_file):
         df  = pd.read_csv(path_file, index_col=None, header=0)
-        
+
 
         self.ques           = []
         self.ques_len       = []

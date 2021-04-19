@@ -7,7 +7,7 @@ import spacy
 nlp = spacy.load("en_core_web_sm")
 
 def graph_construction(paras: list, question: str):
-    """Construct graph' edges using raw question and paras
+    """Construct graph's edges using raw question and paras
 
     Args:
         paras (list): list of raw para
