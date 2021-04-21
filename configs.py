@@ -42,7 +42,9 @@ else:
 args.multi_gpus = torch.cuda.device_count() > 0
 
 args.seq_len_ques       = 40
-args.seq_len_para       = 52
+args.seq_len_dataprocess= 50
+# TODO: Set the following arg after running DataReading module
+args.seq_len_para       = 52        # max len of each para of context after DataReading
 args.seq_len_ans        = 40        # maximum answer length of dataset
 args.n_paras            = 40
 args.d_embd             = 200

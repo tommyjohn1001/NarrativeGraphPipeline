@@ -22,12 +22,13 @@ class PointerGeneratorDecoder(torch_nn.Module):
         self.seq_len_ans    = args.seq_len_ans
         self.max_len_ans    = args.max_len_ans
 
-        self.linear_q       = torch_nn.Linear(self.d_hid, self.d_hid_PGD)
+        self.linear_q       = torch_nn.Linear(768, self.d_hid_PGD)
         self.attn_pool_q    = AttentivePooling(self.d_hid_PGD)
         self.linear_h1      = torch_nn.Linear(self.n_layers, self.seq_len_contx)
         self.linear_h2      = NonLinear(self.d_hid_PGD, self.d_hid_PGD)
         self.linear_y       = NonLinear(self.d_hid_PGD, self.d_hid_PGD)
 
+        self.linear_ans     = torch_nn.Linear(768, self.d_hid_PGD)
 
         self.linear_a       = torch_nn.Linear(self.d_hid_PGD, 1)
 
@@ -93,7 +94,7 @@ class PointerGeneratorDecoder(torch_nn.Module):
             return h_t
 
         def F_q(ques_seq_embd):
-            # ques_seq_embd: [batch, seq_len_ques, d_hid]
+            # ques_seq_embd: [batch, seq_len_ques, 768]
             ques_seq_embd = self.attn_pool_q(self.linear_q(ques_seq_embd))
             # ques_seq_embd: [batch, d_hid_PGD]
 
@@ -122,8 +123,9 @@ class PointerGeneratorDecoder(torch_nn.Module):
             return v_t
 
 
-        Y_      = F_a(Y)
-        ques_seq_embd     = F_q(ques_seq_embd)
+        Y_              = F_a(Y)
+        ques_seq_embd   = F_q(ques_seq_embd)
+        ans_seq_embd    = self.linear_ans(ans_seq_embd)
 
         # CLS is used to initialize LSTMclear
         cls_tok = torch.zeros((batch, 1, self.d_hid_PGD)).to(args.device)

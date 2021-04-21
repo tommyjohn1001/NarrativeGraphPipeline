@@ -102,7 +102,7 @@ class DataReading():
                 sent    = self.clean_sent(sent)
                 sent_   = [tok.text for tok in nlp(sent)]
 
-                if len(sent_) < 50:
+                if len(sent_) < args.seq_len_dataprocess:
                     tmp.append(sent_)
                 else:
                     for sub_sent in nlp(sent).sents:
@@ -119,7 +119,7 @@ class DataReading():
             para        = []
             para_n_toks = 0
             for sent_toks in sentences:
-                if para_n_toks + len(sent_toks) > 50:
+                if para_n_toks + len(sent_toks) > args.seq_len_dataprocess:
                     if para_n_toks > 0:
                         paras   = np.append(paras, self.extract_para(para))
                     para        = sent_toks

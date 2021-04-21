@@ -57,9 +57,9 @@ class SimpleBertEmbd(torch_nn.Module):
         paras_mask  = paras_mask.reshape((-1, seq_len_para))
         # paras, paras_mask: [b*n_paras, seq_len_para]
 
-        _, paras_seq_embd   = self.embedding(paras, paras_mask)
+        para_embd, _    = self.embedding(paras, paras_mask)
         # [b*n_paras, 768]
-        paras_seq_embd      = paras_seq_embd.reshape((b, -1, 768))
+        para_embd       = para_embd.reshape((b, -1, 768))
         # [b, n_paras, 768]
 
 
@@ -69,4 +69,4 @@ class SimpleBertEmbd(torch_nn.Module):
         _, ans_seq_embd = self.embedding(ans, ans_mask)
         # ans_seq_embd : [b, seq_len_ans, 768]
 
-        return ques_embd, ques_seq_embd, paras_seq_embd, ans_seq_embd
+        return ques_embd, ques_seq_embd, para_embd, ans_seq_embd
