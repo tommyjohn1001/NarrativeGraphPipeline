@@ -26,10 +26,10 @@ class GraphReasoning(torch_nn.Module):
         )
 
     def forward(self, node_feat, edge_indx, node_len, edge_len):
-        # node_feat : [b, n_nodes, 768]
-        # edge_indx : [b, 2, *]
-        # edge_len  : [b]
+        # node_feat : [b, 1+n_paras, 768]
+        # edge_indx : [b, 2, n_edges]
         # node_len  : [b]
+        # edge_len  : [b]
 
         def gcn(node_feats, edge_indx):
             X   = self.gcn1(node_feats, edge_indx)
@@ -65,7 +65,7 @@ class GraphReasoning(torch_nn.Module):
     def batchify(self, node_feat:torch.Tensor, node_len:torch.Tensor, edge_indx:torch.Tensor, edge_len:torch.Tensor) -> tuple:
         """Convert batch of node features and edge indices into a big graph"""
 
-        # node_feat : [b, n_nodes, d]
+        # node_feat : [b, n_paras+1, d]
         # node_len  : [b]
         # edge_indx : [b, 2, *]
         # edge_len  : [b]

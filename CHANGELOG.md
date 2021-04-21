@@ -2,6 +2,15 @@
 
 ### This file contains changes and modifications during developing.
 
+## Apr 21 2021, 15:07
+- Fix errors in processing *movie* context in *DataReading* module
+- Reconstruct *DataReading* module
+- Replace **LSTM-based** by **BERT-based** *Embedding layer*
+- Change arguments of *PGD's forward* to fit with new *Embedding layer*
+- Modify training process's variables in model to fit with new *Embedding layer*
+- Reorganize *GraphReasoning* module into new folder
+- Use trick longer answer to calculate loss and 2 answers to calculate metrics
+
 ## Apr 19 2021, 10:53
 - Change and reconstruct repo to fit with *GCN* setting
 

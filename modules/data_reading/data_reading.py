@@ -18,7 +18,7 @@ from configs import args, logging, PATH
 log = logging.getLogger("spacy")
 log.setLevel(logging.ERROR)
 
-nlp             = spacy.load("en_core_web_sm")
+nlp = spacy.load("en_core_web_sm")
 nlp.add_pipe('sentencizer')
 
 
@@ -30,10 +30,6 @@ class DataReading():
     ############################################################
     # Methods to process context, question and answers
     ############################################################
-    def clean_end(self, text:str):
-        text = text.split(' ')
-        return ' '.join(text[:-2])
-
     def clean_context_movie(self, context:str) -> str:
         context = context.lower().strip()
 
@@ -43,7 +39,7 @@ class DataReading():
         # context = re.sub(r'\n ', ' ', context)
         context = re.sub(r"(?<=\w|,)\n(?=\w| )", ' ', context)
         context = re.sub(r'\n{2,}', '\n', context)
-
+        context = re.sub(r'( {2,}|\t)', ' ', context)
 
         return context
 
@@ -61,7 +57,14 @@ class DataReading():
 
         return context
 
-    def export_para(self, toks):
+    def clean_sent(self, sent):
+        sent    = re.sub(r'( {2,}|\t)', ' ', sent)
+        sent    = re.sub(r'(\*|\{|\}|\=|\-|\`|\"|\\){2,}', '', sent)
+        sent    = sent.strip()
+
+        return sent
+
+    def extract_para(self, toks):
         return re.sub(r'( {2,}|\t)', ' ', ' '.join(toks)).strip()
 
     def extract_html(self, context):
@@ -69,145 +72,64 @@ class DataReading():
         context = unidecode.unidecode(soup.text)
         return  context
 
-    def extract_start_end(self, context, start, end):
-        end    = self.clean_end(end)
 
-        start  = context.find(start)
-        end    = context.rfind(end)
-        if start == -1:
-            start = 0
-        if end == -1:
-            end = len(context)
-        if start >= end:
-            start, end    = 0, len(context)
+    def f_process_contx(self, keys, queue, arg):
+        processed_contx = arg[0]
 
-        context = context[start:end]
-
-        return context
-
-    def process_context_movie(self, context, start, end) -> list:
-        """Process context and split into paragrapgs. Dedicated to movie context.
-
-        Args:
-            context (str): context (book or movie script)
-            start (str): start word of context
-            end (str): end word of context
-
-        Returns:
-            list: list of paras
-        """
-
-        ## Extract text from HTML
-        context = self.extract_html(context)
-
-        ## Use field 'start' and 'end' provided
-        context = self.extract_start_end(context, start, end)
-
-        ## Clean context and split into paras
-        sentences   = self.clean_context_movie(context).split('\n')
-
-        paras       = np.array([])
-        n_tok       = 0 
-        para        = []
-        for sent in sentences:
-            ## Tokenize, remove stopword
-            sent_   = [tok.text for tok in nlp(sent)]
-
-            ## Concat sentece if not exceed paragraph max len
-            if n_tok + len(sent_) < 50:
-                n_tok   += len(sent_)
-                para.extend(sent_)
-            else:
-                paras   = np.append(paras, self.export_para(para))
-                n_tok   = 0
-                para    = []
-
-
-        return paras.tolist()
-
-    def process_context_gutenberg(self, context, start, end):
-        """Process context and split into paragrapgs. Dedicated to gutenberg context.
-
-        Args:
-            context (str): context (book or movie script)
-            start (str): start word of context
-            end (str): end word of context
-
-        Returns:
-            list: list of paras
-        """
-
-        ## Extract text from HTML
-        context = self.extract_html(context)
-
-        ## Use field 'start' and 'end' provided
-        context = self.extract_start_end(context, start, end)
-
-        ## Clean context and split into paras
-        sentences   = self.clean_context_gutenberg(context).split('\n')
-
-        paras       = np.array([])
-        n_tok       = 0
-        para        = []
-        for sent in sentences:
-            ## Tokenize, remove stopword
-            sent_   = [tok.text for tok in nlp(sent)]
-
-            if len(sent_) > 50:
-                # Long paragraph: split into sentences and
-                # apply concatenating strategy
-
-                # Finish concateraning para
-                if len(para) > 0:
-                    paras = np.append(paras, self.export_para(para))
-                    n_tok   = 0
-                    para    = []
-
-                # Split into sentences and
-                # apply concatenating strategy
-                for sub_sent in nlp(sent).sents:
-                    sent_   = [tok.text for tok in sub_sent]
-
-                    if n_tok + len(sent_) < 50:
-                        n_tok   += len(sent_)
-                        para.extend(sent_)
-                    else:
-                        paras   = np.append(paras, self.export_para(para))
-                        n_tok   = len(sent_)
-                        para    = sent_
-
-                if len(para) > 0:
-                    paras = np.append(paras, self.export_para(para))
-                    n_tok   = 0
-                    para    = []
-
-            else:
-                if n_tok + len(sent_) < 50:
-                    n_tok   += len(sent_)
-                    para.extend(sent_)
-                else:
-                    paras   = np.append(paras, self.export_para(para))
-                    n_tok   = len(sent_)
-                    para    = sent_
-
-        if para != "":
-            paras   = np.append(paras, self.export_para(para))
-            n_tok   = len(sent_)
-            para    = sent_
-
-
-        return paras.tolist()
-
-
-    def f_process_contx(self, keys, queue, args):
-        processed_contx = args[0]
         for key in keys:
-            context, kind, start, end = processed_contx[key]
+            context, kind   = processed_contx[key]
 
+            ###############################
+            ## Clean context and break
+            ## into separated sentences
+            ###############################
+            ## Breaking method use 2 methods:
+            ##  - Breaking by character '\n
+            ##  - Breaking by spacy's sentencizer
+
+            ## Extract text from HTML
+            context = self.extract_html(context)
+
+            ## Clean context and use 1st method to break into sentences
             if kind == "movie":
-                paras   = self.process_context_movie(context, start, end)
+                sentences   = self.clean_context_movie(context).split('\n')
             else:
-                paras   = self.process_context_gutenberg(context, start, end)
+                sentences   = self.clean_context_gutenberg(context).split('\n')
+
+            ## Use 2nd method to break into sentences
+            tmp     = []
+            for sent in sentences:
+                sent    = self.clean_sent(sent)
+                sent_   = [tok.text for tok in nlp(sent)]
+
+                if len(sent_) < 50:
+                    tmp.append(sent_)
+                else:
+                    for sub_sent in nlp(sent).sents:
+                        sent_   = [tok.text for tok in sub_sent]
+                        tmp.append(sent_)
+
+            sentences   = tmp
+
+
+            ###############################
+            ## Construc paragraphs from sentencces
+            ###############################
+            paras       = np.array([])
+            para        = []
+            para_n_toks = 0
+            for sent_toks in sentences:
+                if para_n_toks + len(sent_toks) > 50:
+                    if para_n_toks > 0:
+                        paras   = np.append(paras, self.extract_para(para))
+                    para        = sent_toks
+                    para_n_toks = len(sent_toks)
+                else:
+                    para.extend(sent_toks)
+                    para_n_toks += len(sent_toks)
+            if para_n_toks:
+                paras   = np.append(paras, self.extract_para(para))
+
 
             queue.put((key, paras))
 
@@ -254,14 +176,14 @@ class DataReading():
 
         return goldens
 
-    def process_entry(self, entries, queue, args):
+    def process_entry(self, entries, queue, arg):
         """This function is used to run in parallel to read and initially preprocess
         raw documents. Afterward, it puts a dict containing result into queue.
 
         Args:
             document (dict): a document of dataset
         """
-        processed_contx = args[0]
+        processed_contx = arg[0]
 
         for entry in entries:
             #########################
@@ -346,9 +268,7 @@ class DataReading():
                     _   = self.processed_contx[id_]
                 except KeyError:
                     shared_dict[id_] = np.array([entry['document']['text'],
-                                                        entry['document']['kind'],
-                                                        entry['document']['start'],
-                                                        entry['document']['end']])
+                                                 entry['document']['kind']])
 
             # Start processing context in parallel
             list_tuples = ParallelHelper(self.f_process_contx, list(shared_dict.keys()),

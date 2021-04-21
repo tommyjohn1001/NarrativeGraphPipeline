@@ -1,9 +1,9 @@
 
-from transformers import BertModel
 import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 
+from modules.finegrained.BertEmbedding import BertEmbedding
 from modules.utils import transpose
 from configs import args
 
@@ -18,7 +18,7 @@ class FineGrain(torch_nn.Module):
         self.d_emb  = d_emb
 
         ## Modules for embedding
-        self.embedding      = BertModel.from_pretrained(bert_model)
+        self.embedding      = BertEmbedding()
         self.biGRU_emb      = torch_nn.GRU(d_emb, d_hid//2, num_layers=5,
                                            batch_first=True, bidirectional=True)
         self.linear_embd    = torch_nn.Linear(d_emb, d_emb)
@@ -57,8 +57,8 @@ class FineGrain(torch_nn.Module):
             ###################
             L_q = self.embedding(ques, ques_mask)[0]
             L_s = self.embedding(para, para_mask)[0]
-            # L_q: [batch, seq_len_ques, d_embd]
-            # L_s: [batch, seq_len_para, d_embd]
+            # L_q: [batch, seq_len_ques, 768]
+            # L_s: [batch, seq_len_para, 768]
 
             L_q = torch.tanh(self.linear_embd(L_q))
 
