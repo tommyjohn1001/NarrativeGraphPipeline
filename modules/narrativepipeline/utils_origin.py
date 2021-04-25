@@ -32,26 +32,50 @@ def pad(l, max_len):
 class Vocab:
     def __init__(self, path_vocab=None) -> None:
         if path_vocab is None:
-            path_vocab  = PATH['vocab_PGD']
+            path_vocab  =PATH['vocab_PGD']
 
-        self.stoi   = dict()
-        self.itos   = dict()
+        self.dict_stoi   = dict()
+        self.dict_itos   = dict()
+
+        self.PAD = "[PAD]"
+        self.CLS = "[CLS]"
+        self.SEP = "[SEP]"
+        self.UNK = "[UNK]"
 
         # Add special tokens
-        for ith, word in enumerate([PAD, CLS, SEP, UNK]):
-            self.stoi[word] = ith
-            self.itos[ith]  = word
+        for ith, word in enumerate([self.PAD, self.CLS, self.SEP, self.UNK]):
+            self.dict_stoi[word] = ith
+            self.dict_itos[ith]  = word
 
-        # COnstruct vocab from token list file
+        # Construct vocab from token list file
         with open(path_vocab, 'r') as vocab_file:
             for ith, word in enumerate(vocab_file.readlines()):
                 word = word.replace('\n', '')
                 if word != '':
-                    self.stoi[word] = ith
-                    self.itos[ith]  = word
+                    self.dict_stoi[word] = ith
+                    self.dict_itos[ith]  = word
 
     def __len__(self):
-        return len(self.stoi)
+        return len(self.dict_stoi)
+
+    def stoi(self, tok):
+        try:
+            id_ = self.dict_stoi[tok]
+        except KeyError:
+            id_ = self.dict_stoi[self.UNK]
+
+        return id_
+
+    def itos(self, id_):
+        try:
+            tok = self.dict_itos[id_]
+        except KeyError:
+            tok = self.UNK
+
+        return tok
+
+    def convert_tokens_to_ids(self, toks: list):
+        return list(map(self.stoi, toks))
 
 
 class CustomDataset(Dataset):
@@ -67,11 +91,8 @@ class CustomDataset(Dataset):
         self.ques           = None
         self.ques_len       = None
         self.ans1           = None
-        self.ans2           = None
         self.ans1_len       = None
-        self.ans2_len       = None
         self.ans1_mask      = None
-        self.ans2_mask      = None
         self.ans1_tok_idx   = None
         self.ans2_tok_idx   = None
         self.contx          = None
@@ -94,11 +115,8 @@ class CustomDataset(Dataset):
             'contx'         : self.contx[idx],
             'contx_len'     : self.contx_len[idx],
             'ans1'          : self.ans1[idx],
-            'ans2'          : self.ans2[idx],
             'ans1_len'      : self.ans1_len[idx],
-            'ans2_len'      : self.ans2_len[idx],
             'ans1_mask'     : self.ans1_mask[idx],
-            'ans2_mask'     : self.ans2_mask[idx],
             'ans1_tok_idx'  : self.ans1_tok_idx[idx],
             'ans2_tok_idx'  : self.ans2_tok_idx[idx]
         }
@@ -121,22 +139,22 @@ class CustomDataset(Dataset):
             answers         = ast.literal_eval(entry.answers)
             ans1, ans2      = answers[0].split(' '), answers[1].split(' ')
 
+            if len(ans1) < len(ans2):
+                ans1, ans2 = ans2, ans1
+
 
             ans1_mask       = np.array([1]*len(ans1) +\
                                        [0]*(args.seq_len_ans - len(ans1)), dtype=np.float)
-            ans2_mask       = np.array([1]*len(ans2) +\
-                                       [0]*(args.seq_len_ans - len(ans2)), dtype=np.float)
 
             ans1, ans1_len  = pad(ans1, args.seq_len_ans)
-            ans2, ans2_len  = pad(ans2, args.seq_len_ans)
+            ans2, _         = pad(ans2, args.seq_len_ans)
 
-            ans1_tok_idx    = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w]
+            ans1_tok_idx    = np.array([self.vocab.stoi(w.lower()) if w not in special_toks else self.vocab.stoi(w)
                                         for w in ans1], dtype=np.long)
-            ans2_tok_idx    = np.array([self.vocab.stoi[w.lower()] if w not in special_toks else self.vocab.stoi[w] 
+            ans2_tok_idx    = np.array([self.vocab.stoi(w.lower()) if w not in special_toks else self.vocab.stoi(w)
                                         for w in ans2], dtype=np.long)
 
             ans1 = glove_embd.get_vecs_by_tokens(ans1).numpy()
-            ans2 = glove_embd.get_vecs_by_tokens(ans2).numpy()
 
 
             ###########################
@@ -161,11 +179,8 @@ class CustomDataset(Dataset):
                 'ques'          : ques,
                 'ques_len'      : ques_len,
                 'ans1'          : ans1,
-                'ans2'          : ans2,
                 'ans1_len'      : ans1_len,
-                'ans2_len'      : ans2_len,
                 'ans1_mask'     : ans1_mask,
-                'ans2_mask'     : ans2_mask,
                 'ans1_tok_idx'  : ans1_tok_idx,
                 'ans2_tok_idx'  : ans2_tok_idx,
                 'contx'         : contx,
@@ -179,11 +194,8 @@ class CustomDataset(Dataset):
         self.ques           = []
         self.ques_len       = []
         self.ans1           = []
-        self.ans2           = []
         self.ans1_len       = []
-        self.ans2_len       = []
         self.ans1_mask      = []
-        self.ans2_mask      = []
         self.ans1_tok_idx   = []
         self.ans2_tok_idx   = []
         self.contx          = []
@@ -205,11 +217,8 @@ class CustomDataset(Dataset):
             self.ques.append(entry['ques'])
             self.ques_len.append(entry['ques_len'])
             self.ans1.append(entry['ans1'])
-            self.ans2.append(entry['ans2'])
             self.ans1_len.append(entry['ans1_len'])
-            self.ans2_len.append(entry['ans2_len'])
             self.ans1_mask.append(entry['ans1_mask'])
-            self.ans2_mask.append(entry['ans2_mask'])
             self.ans1_tok_idx.append(entry['ans1_tok_idx'])
             self.ans2_tok_idx.append(entry['ans2_tok_idx'])
             self.contx.append(entry['contx'])

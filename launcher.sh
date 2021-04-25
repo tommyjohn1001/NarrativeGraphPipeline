@@ -12,7 +12,7 @@ launch()
     # python -m modules.data_reading.data_reading --num_proc 8
 
     # echo "2. Start training"
-    python -m modules.narrativepipeline.NarrativePipeline --batch 40 --num_proc 8 --n_epochs 100 --lr 7e-3 --w_decay 1e-4
+    python -m modules.narrativepipeline.NarrativePipeline --batch 40 --num_proc 8 --n_epochs 60 --lr 7e-5 --w_decay 1e-4
 }
 
 
@@ -48,7 +48,7 @@ debug()
 
 print_help()
 {
-    echo "** Usage of Laucher"
+    echo "** Usage of Launcher"
     echo "laucher [] []"
     echo "-l or --launch or no flag : Launch the api"
     echo "-u or --update-git        : Update git"

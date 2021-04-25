@@ -1,4 +1,4 @@
-import os
+import os, json, sys
 
 from torch.utils.data import DataLoader
 import torch.nn.functional as torch_f
@@ -8,8 +8,9 @@ from transformers import AdamW
 
 
 from modules.narrativepipeline.utils_origin import CustomDataset, build_vocab_PGD, Vocab
-from modules.ans_infer.PointerGeneratorDecoder import PointerGeneratorDecoder
-from modules.utils import check_exist, transpose, get_scores
+# from modules.ans_infer.PointerGeneratorDecoder import PointerGeneratorDecoder
+from modules.ans_infer.Transformer import TransDecoder
+from modules.utils import check_exist, get_scores
 from modules.Reasoning.IAL import IntrospectiveAlignmentLayer
 from modules.finegrained.Embedding import EmbeddingLayer
 from configs import args, logging, PATH
@@ -20,7 +21,7 @@ class  NarrativePipeline(torch_nn.Module):
 
         self.embd_layer = EmbeddingLayer()
         self.reasoning  = IntrospectiveAlignmentLayer()
-        self.ans_infer  = PointerGeneratorDecoder(vocab)
+        self.ans_infer  = TransDecoder(vocab)
 
     def forward(self, ques, ques_len, contx, contx_len,
                 ans, ans_len, ans_mask, is_inferring=False):
@@ -53,8 +54,7 @@ class  NarrativePipeline(torch_nn.Module):
         ####################
         # Generate answer with PGD
         ####################
-        pred    = self.ans_infer(Y, H_q, ans, ans_len,
-                                 ans_mask, is_inferring)
+        pred    = self.ans_infer(Y, ans, ans_mask, is_inferring)
         # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
 
         return pred
@@ -143,16 +143,17 @@ class Trainer():
                 ans_len      = batch['ans1_len']
                 ans_mask     = batch['ans1_mask'].to(args.device)
                 ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
-                ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
 
                 optimizer.zero_grad()
 
                 pred        = model(ques, ques_len, contx, contx_len,
                                     ans, ans_len, ans_mask, is_inferring=False)
-                # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
-                pred        = transpose(pred)
-                # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
-                loss        = criterion(pred, ans1_tok_idx) + criterion(pred, ans2_tok_idx)/2
+                # pred: [batch, seq_len_ans, d_vocab]
+                pred_flat   = pred.view(-1, args.d_vocab)
+                ans1_flat   = ans1_tok_idx.view(-1)
+
+
+                loss        = criterion(pred_flat, ans1_flat)
 
                 loss.backward()
                 torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=0.25)
@@ -189,14 +190,14 @@ class Trainer():
                     ans_len     = batch['ans1_len']
                     ans_mask    = batch['ans1_mask'].to(args.device)
                     ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
-                    ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
 
                     pred        = model(ques, ques_len, contx, contx_len,
                                         ans, ans_len, ans_mask, is_inferring=True)
-                    # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
-                    pred        = transpose(pred)
-                    # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
-                    loss        = criterion(pred, ans1_tok_idx) + criterion(pred, ans2_tok_idx)/2
+                    # pred: [batch, seq_len_ans, d_vocab]
+                    pred_flat   = pred.view(-1, args.d_vocab)
+                    ans1_flat   = ans1_tok_idx.view(-1)
+
+                    loss        = criterion(pred_flat, ans1_flat)
 
                     loss_test += loss.detach().item()
 
@@ -223,7 +224,11 @@ class Trainer():
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
         scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=0)
 
-        criterion   = torch_nn.CrossEntropyLoss()
+        criterion   = torch_nn.CrossEntropyLoss(ignore_index=self.vocab.stoi(self.vocab.PAD))
+
+        for p in model.parameters():
+            if p.dim() > 1:
+                torch_nn.init.xavier_uniform_(p)
 
         start_epoch = 0
 
@@ -273,15 +278,32 @@ class Trainer():
         # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
         # ans_tok_idx: [batch, seq_len_ans]
 
-        pred_   = torch.argmax(torch_f.log_softmax(pred, 1), 1)
+        pred_   = torch.argmax(torch_f.log_softmax(pred, 1), 2)
+        print(f"pred shape: {pred.shape}")
+        print(f"pred_ shape: {pred_.shape}")
         # pred_: [batch, seq_len_ans]
 
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
 
         for p, a1, a2 in zip(pred_.tolist(), ans1_tok_idx.tolist(), ans2_tok_idx.tolist()):
-            p_  = ' '.join([self.vocab.itos[i - 1] for i in p if i > 0])
-            a1_ = ' '.join([self.vocab.itos[i - 1] for i in a1 if i > 0])
-            a2_ = ' '.join([self.vocab.itos[i - 1] for i in a1 if i > 0])
+            p_  = ' '.join([self.vocab.itos(i - 1) for i in p if i > 0])
+            a1_ = ' '.join([self.vocab.itos(i - 1) for i in a1 if i > 0])
+            a2_ = ' '.join([self.vocab.itos(i - 1) for i in a2 if i > 0])
+
+
+            
+            with open("sample_output.txt", 'w+') as d_file:
+                json.dump({
+                    'pred'  : p,
+                    'pred_w': p_,
+                    'ans1'  : a1,
+                    'ans1_w': a1_,
+                    'ans2'  : a2,
+                    'ans2_w': a2_
+                }, d_file, indent=2, ensure_ascii=False)
+            sys.exit()
+
+
 
             bleu_1_1_, bleu_4_1_, meteor_1_, rouge_l_1_ = get_scores(p_, a1_)
             bleu_1_2_, bleu_4_2_, meteor_2_, rouge_l_2_ = get_scores(p_, a2_)
@@ -340,13 +362,14 @@ class Trainer():
 
                     pred        = model(ques, ques_len, contx, contx_len,
                                         ans, ans_len, ans_mask, is_inferring=True)
-                    # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
-                    pred        = transpose(pred)
-                    # pred: [batch, d_vocab + seq_len_cntx, max_len_ans]
-                    loss        = criterion(pred, ans1_tok_idx) + criterion(pred, ans2_tok_idx)/2
+                    # pred: [batch, seq_len_ans, d_vocab]
+                    pred_flat   = pred.view(-1, args.d_vocab)
+                    ans1_flat   = ans1_tok_idx.view(-1)
+
+                    loss        = criterion(pred_flat, ans1_flat)
 
                     # Calculate loss
-                    loss_test += loss.detach().item()
+                    loss_test   += loss.detach().item()
 
                     # Get batch score
                     bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
@@ -363,12 +386,20 @@ class Trainer():
         logging.info(f"End validattion: bleu_1 {bleu_1/n_samples:.5f} | bleu_4 {bleu_4/n_samples:.5f} \
                      | meteor {meteor/n_samples:.5f} | rouge_l {rouge_l/n_samples:.5f}")
 
+        with open("eval_result.json", 'w+') as result_file:
+            json.dump({
+                'bleu_1': bleu_1/n_samples,
+                'bleu_4': bleu_4/n_samples,
+                'meteor': meteor/n_samples,
+                'rouge_l': rouge_l/n_samples,
+            }, result_file, indent=2, ensure_ascii=False)
+
 if __name__ == '__main__':
     logging.info("* Start NarrativePipeline")
 
 
     narrative_pipeline  = Trainer()
 
-    narrative_pipeline.trigger_train()
+    # narrative_pipeline.trigger_train()
 
     narrative_pipeline.trigger_infer()
