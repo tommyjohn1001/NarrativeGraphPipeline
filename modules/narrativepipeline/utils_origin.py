@@ -88,6 +88,8 @@ class CustomDataset(Dataset):
         # Read vocab
         self.vocab  = Vocab(path_vocab)
 
+        self.docId          = None
+        self.ques_plain     = None
         self.ques           = None
         self.ques_len       = None
         self.ans1           = None
@@ -110,6 +112,8 @@ class CustomDataset(Dataset):
 
 
         return {
+            'docId'         : self.docId[idx],
+            'ques_plain'    : self.ques_plain[idx],
             'ques'          : self.ques[idx],
             'ques_len'      : self.ques_len[idx],
             'contx'         : self.contx[idx],
@@ -176,6 +180,8 @@ class CustomDataset(Dataset):
             # context: [SEQ_LEN_CONTEXT = 1600, d_embd = 200]
 
             queue.put({
+                'docId'         : entry.doc_id,
+                'ques_plain'    : entry.question,
                 'ques'          : ques,
                 'ques_len'      : ques_len,
                 'ans1'          : ans1,
@@ -190,7 +196,8 @@ class CustomDataset(Dataset):
     def read_shard(self, path_file):
         df  = pd.read_csv(path_file, index_col=None, header=0)
 
-
+        self.docId          = []
+        self.ques_plain     = []
         self.ques           = []
         self.ques_len       = []
         self.ans1           = []
@@ -214,6 +221,8 @@ class CustomDataset(Dataset):
                                 # desc="", total=len(df)))
 
         for entry in entries:
+            self.docId.append(entry['docId'])
+            self.ques_plain.append(entry['ques_plain'])
             self.ques.append(entry['ques'])
             self.ques_len.append(entry['ques_len'])
             self.ans1.append(entry['ans1'])

@@ -137,8 +137,6 @@ def get_scores(pred, trg):
         tuple: tuple containing scores
     """
 
-    print(f"Pred: {pred}")
-    print(f"Trg : {trg}")
     rouge_l = Rouge().get_scores(pred, trg, avg=True)['rouge-l']
 
     bleu_1 = sentence_bleu(pred, trg, weights=(1, 0, 0, 0))

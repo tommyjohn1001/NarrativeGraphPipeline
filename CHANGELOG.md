@@ -2,6 +2,11 @@
 
 ### This file contains changes and modifications during developing.
 
+## Apr 27 2021, 15:25
+- Implement *Beam Search* and add to *TransDecoder* module
+- Reimplement *get_score* function to calculate *BLEU-1*, *BLEU-4*...
+- Add feature writing metric scores during testing
+
 ## Apr 19 2021, 15:45
 - Fix serious errors in *PGD* about dimension and teacher forcing
 - Add second answer to calculate loss and metrics
