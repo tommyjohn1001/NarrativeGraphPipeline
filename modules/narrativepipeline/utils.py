@@ -22,30 +22,48 @@ class Vocab:
         if path_vocab is None:
             path_vocab  =PATH['vocab_PGD']
 
-        self.stoi   = dict()
-        self.itos   = dict()
+        self.dict_stoi   = dict()
+        self.dict_itos   = dict()
 
-        PAD = "[PAD]"
-        CLS = "[CLS]"
-        SEP = "[SEP]"
-        UNK = "[UNK]"
+        self.PAD = "[PAD]"
+        self.CLS = "[CLS]"
+        self.SEP = "[SEP]"
+        self.UNK = "[UNK]"
 
         # Add special tokens
-        for ith, word in enumerate([PAD, CLS, SEP, UNK]):
-            self.stoi[word] = ith
-            self.itos[ith]  = word
+        for ith, word in enumerate([self.PAD, self.CLS, self.SEP, self.UNK]):
+            self.dict_stoi[word] = ith
+            self.dict_itos[ith]  = word
 
         # Construct vocab from token list file
         with open(path_vocab, 'r') as vocab_file:
             for ith, word in enumerate(vocab_file.readlines()):
                 word = word.replace('\n', '')
                 if word != '':
-                    self.stoi[word] = ith
-                    self.itos[ith]  = word
+                    self.dict_stoi[word] = ith
+                    self.dict_itos[ith]  = word
 
     def __len__(self):
-        return len(self.stoi)
+        return len(self.dict_stoi)
 
+    def stoi(self, tok):
+        try:
+            id_ = self.dict_stoi[tok]
+        except KeyError:
+            id_ = self.dict_stoi[self.UNK]
+
+        return id_
+
+    def itos(self, id_):
+        try:
+            tok = self.dict_itos[id_]
+        except KeyError:
+            tok = self.UNK
+
+        return tok
+
+    def convert_tokens_to_ids(self, toks: list):
+        return list(map(self.stoi, toks))
 
 class CustomDataset(Dataset):
     def __init__(self, path_csv_dir, path_vocab):
@@ -100,8 +118,7 @@ class CustomDataset(Dataset):
     ###########################################
     # USER-DEFINED METHOD
     ###########################################
-
-    def process_sent(self, sent:str, max_len: int, nlp_bert) -> tuple:
+    def process_sent(self, sent:str, max_len: int, nlp_bert: BertTokenizer, vocab: Vocab =None) -> tuple:
         """Process sentence (question, a sentence in context or answer).
 
         Args:
@@ -112,13 +129,25 @@ class CustomDataset(Dataset):
             tuple: tuple containing numpy arrays
         """
 
-        sent_   = sent.split(' ')
-        sent_   = nlp_bert.convert_tokens_to_ids(sent_)
-        sent_   = [nlp_bert.cls_token_id] + sent_ + [nlp_bert.sep_token_id]
+        sent_   = sent.lower().split(' ')
+        if vocab:
+            sent_       = vocab.convert_tokens_to_ids(sent_)
+
+            cls_tok_id  = vocab.stoi(vocab.CLS)
+            sep_tok_id  = vocab.stoi(vocab.SEP)
+            pad_tok_id  = vocab.stoi(vocab.PAD)
+        else:
+            sent_       = nlp_bert.convert_tokens_to_ids(sent_)
+
+            cls_tok_id  = nlp_bert.cls_token_id
+            sep_tok_id  = nlp_bert.sep_token_id
+            pad_tok_id  = nlp_bert.pad_token_id
+
+        sent_       = [cls_tok_id] + sent_ + [sep_tok_id]
 
         sent_len_   = len(sent_)
         sent_mask_  = np.array([1]*sent_len_ + [0]*(max_len - sent_len_), dtype=np.float)
-        sent_       = np.array(sent_ + [nlp_bert.pad_token_id]*(max_len - sent_len_), dtype=np.int)
+        sent_       = np.array(sent_ + [pad_tok_id]*(max_len - sent_len_), dtype=np.int)
 
         return sent_, np.array(sent_len_), sent_mask_
 
@@ -136,14 +165,6 @@ class CustomDataset(Dataset):
         """
 
         paras.insert(0, question)
-
-        vertex_s, vertex_d  = [], []
-        def add_edge(src, dest):
-            vertex_s.append(src)
-            vertex_d.append(dest)
-
-            vertex_s.append(dest)
-            vertex_d.append(src)
 
         para_vocab  = defaultdict(set)
 
@@ -187,6 +208,7 @@ class CustomDataset(Dataset):
     def f_process_file(self, entries, queue, arg):
         nlp_bert    = arg[0]
         nlp_spacy   = arg[1]
+        vocab       = arg[2]
 
         for entry in entries.itertuples():
             ###########################
@@ -205,8 +227,8 @@ class CustomDataset(Dataset):
             if len(ans1) < len(ans2):
                 answers[0], answers[1] = answers[1], answers[0]
 
-            ans1, _, ans1_mask  = self.process_sent(answers[0], args.seq_len_ans, nlp_bert)
-            ans2, _, _          = self.process_sent(answers[1], args.seq_len_ans, nlp_bert)
+            ans1, _, ans1_mask  = self.process_sent(answers[0], args.seq_len_ans, nlp_bert, vocab)
+            ans2, _, _          = self.process_sent(answers[1], args.seq_len_ans, nlp_bert, vocab)
 
 
             ###########################
@@ -279,7 +301,7 @@ class CustomDataset(Dataset):
         # answers' mask and index
         ######################
         entries = ParallelHelper(self.f_process_file, df, lambda dat, l, h: dat.iloc[l:h],
-                                 args.num_proc, self.nlp_bert, self.nlp_spacy).launch()
+                                 args.num_proc, self.nlp_bert, self.nlp_spacy, self.vocab).launch()
         # with Pool(args.num_proc) as pool:
         #     entries = list(tqdm(pool.imap(f_process_file, zip(df.to_dict(orient='records'), repeat(self.vocab), repeat(self.n_exchange))),
                                 # desc="", total=len(df)))

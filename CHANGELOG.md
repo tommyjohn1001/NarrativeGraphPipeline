@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## Apr 25 2021, 16:18
+- Reimplement function calculating *ROUGE-L*, *BLEU-1*...
+- Implement *Beam Search*
+- Implement new answer inferring module namely *TransDecoder* ans use *Beam Search*
+- Add feature logging metric calculation in testing phase
+
 ## Apr 21 2021, 15:07
 - Fix errors in processing *movie* context in *DataReading* module
 - Reconstruct *DataReading* module

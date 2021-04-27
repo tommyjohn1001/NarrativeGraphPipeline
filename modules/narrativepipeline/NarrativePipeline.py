@@ -1,4 +1,4 @@
-import os
+import os, json
 
 from torch.utils.data import DataLoader
 import torch.nn.functional as torch_f
@@ -8,8 +8,9 @@ from transformers import AdamW
 
 
 from modules.narrativepipeline.utils import CustomDataset, build_vocab_PGD, Vocab
-from modules.ans_infer.PointerGeneratorDecoder import PointerGeneratorDecoder
-from modules.utils import check_exist, transpose, get_scores
+# from modules.ans_infer.PointerGeneratorDecoder import PointerGeneratorDecoder
+from modules.ans_infer.Transformer import TransDecoder
+from modules.utils import check_exist, get_scores
 from modules.Reasoning.GraphReasoning import GraphReasoning
 from modules.finegrained.BertEmbedding import SimpleBertEmbd
 from configs import args, logging, PATH
@@ -20,7 +21,7 @@ class  NarrativePipeline(torch_nn.Module):
 
         self.embd_layer = SimpleBertEmbd()
         self.reasoning  = GraphReasoning()
-        self.ans_infer  = PointerGeneratorDecoder(vocab)
+        self.ans_infer  = TransDecoder(vocab)
 
     def forward(self, ques, ques_mask, ans, ans_mask,
                 paras, paras_len, paras_mask, edge_indx,
@@ -152,36 +153,25 @@ class Trainer():
             iterator_train  = DataLoader(dataset_train, batch_size=args.batch, shuffle=True)
 
             for batch in iterator_train:
-                ques        = batch['ques'].to(args.device)
-                ques_mask   = batch['ques_mask'].to(args.device)
-                ans1        = batch['ans1'].to(args.device)
-                ans1_mask   = batch['ans1_mask'].to(args.device)
-                paras       = batch['paras'].to(args.device)
-                paras_len   = batch['paras_len'].to(args.device)
-                paras_mask  = batch['paras_mask'].to(args.device)
-                edge_indx   = batch['edge_indx'].to(args.device)
-                edge_len    = batch['edge_len'].to(args.device)
-                # ques      : [b, seq_len_ques]
-                # ques_mask : [b, seq_len_ques]
-                # paras     : [b, n_paras, seq_len_para]
-                # paras_len : [b]
-                # paras_mask: [b, n_paras, seq_len_para]
-                # ans1      : [b, seq_len_ans]
-                # ans1_mask : [b, seq_len_ans]
-                # edge_indx : [b, 2, n_edges]
-                # edge_len  : [b]
-
+                ques         = batch['ques'].to(args.device)
+                ques_len     = batch['ques_len']
+                contx        = batch['contx'].to(args.device)
+                contx_len    = batch['contx_len']
+                ans          = batch['ans1'].to(args.device)
+                ans_len      = batch['ans1_len']
+                ans_mask     = batch['ans1_mask'].to(args.device)
+                ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
 
                 optimizer.zero_grad()
 
-                pred        = model(ques, ques_mask, ans1, ans1_mask,
-                                    paras, paras_len, paras_mask, edge_indx,
-                                    edge_len, is_inferring=False)
-                # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
+                pred        = model(ques, ques_len, contx, contx_len,
+                                    ans, ans_len, ans_mask, is_inferring=False)
+                # pred: [batch, seq_len_ans, d_vocab]
+                pred_flat   = pred.view(-1, args.d_vocab)
+                ans1_flat   = ans1_tok_idx.view(-1)
 
-                pred        = transpose(pred)
-                # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
-                loss        = criterion(pred, ans1)
+
+                loss        = criterion(pred_flat, ans1_flat)
 
                 loss.backward()
                 torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=0.25)
@@ -197,8 +187,9 @@ class Trainer():
 
 
     def test(self, model, dataset_test, criterion):
-        loss_test   = 0
-        nth_batch   = 0
+        nth_batch, n_samples            = 0, 0
+        loss_test                       = 0
+        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
 
         model.eval()
 
@@ -207,41 +198,47 @@ class Trainer():
                 logging.info(f"Eval with file: {eval_file}")
 
                 dataset_test.read_shard(eval_file)
-                iterator_test  = DataLoader(dataset_test, batch_size=args.batch, shuffle=False)
+                iterator_test  = DataLoader(dataset_test, batch_size=args.batch)
+                n_samples   += len(dataset_test)
 
                 for batch in iterator_test:
                     ques        = batch['ques'].to(args.device)
-                    ques_mask   = batch['ques_mask'].to(args.device)
-                    ans1        = batch['ans1'].to(args.device)
-                    ans1_mask   = batch['ans1_mask'].to(args.device)
-                    paras       = batch['paras'].to(args.device)
-                    paras_len   = batch['paras_len'].to(args.device)
-                    paras_mask  = batch['paras_mask'].to(args.device)
-                    edge_indx   = batch['edge_indx'].to(args.device)
-                    edge_len    = batch['edge_len'].to(args.device)
-                    # ques      : [b, seq_len_ques]
-                    # ques_mask : [b, seq_len_ques]
-                    # paras     : [b, n_paras, seq_len_para]
-                    # paras_len : [b]
-                    # paras_mask: [b, n_paras, seq_len_para]
-                    # ans1      : [b, seq_len_ans]
-                    # ans1_mask : [b, seq_len_ans]
-                    # edge_indx : [b, 2, n_edges]
-                    # edge_len  : [b]
+                    ques_len    = batch['ques_len']
+                    contx       = batch['contx'].to(args.device)
+                    contx_len   = batch['contx_len']
+                    ans         = batch['ans1'].to(args.device)
+                    ans_len     = batch['ans1_len']
+                    ans_mask    = batch['ans1_mask'].to(args.device)
+                    ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
 
-                    pred        = model(ques, ques_mask, ans1, ans1_mask,
-                                        paras, paras_len, paras_mask, edge_indx,
-                                        edge_len, is_inferring=True)
-                    # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
+                    pred        = model(ques, ques_len, contx, contx_len,
+                                        ans, ans_len, ans_mask, is_inferring=True)
+                    # pred: [batch, seq_len_ans, d_vocab]
+                    pred_flat   = pred.view(-1, args.d_vocab)
+                    ans1_flat   = ans1_tok_idx.view(-1)
 
-                    pred        = transpose(pred)
-                    # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
-                    loss        = criterion(pred, ans1)
+                    loss        = criterion(pred_flat, ans1_flat)
 
                     loss_test += loss.detach().item()
 
+                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
+
+                    bleu_1  += bleu_1_
+                    bleu_4  += bleu_4_
+                    meteor  += meteor_
+                    rouge_l += rouge_l_
+
                     logging.info(f"  test: batch {nth_batch:4d} | loss: {loss:8.6f}")
                     nth_batch += 1
+
+        with open("eval_result.json", 'a+') as result_file:
+            json.dump({
+                'tag'   : "infer",
+                'bleu_1': bleu_1/n_samples,
+                'bleu_4': bleu_4/n_samples,
+                'meteor': meteor/n_samples,
+                'rouge_l': rouge_l/n_samples,
+            }, result_file, indent=2, ensure_ascii=False)
 
         return loss_test / nth_batch
 
@@ -261,9 +258,13 @@ class Trainer():
         ###############################
         model       = NarrativePipeline(self.vocab).to(args.device)
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
-        scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=15, eta_min=0)
+        scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=0)
 
-        criterion   = torch_nn.CrossEntropyLoss()
+        criterion   = torch_nn.CrossEntropyLoss(ignore_index=self.vocab.stoi(self.vocab.PAD))
+
+        for p in model.parameters():
+            if p.dim() > 1:
+                torch_nn.init.xavier_uniform_(p)
 
         start_epoch = 0
 
@@ -303,7 +304,7 @@ class Trainer():
             self.save_checkpoint(model, optimizer, scheduler, nth_epoch)
 
 
-    def get_batch_scores(self, pred, ans1_tok_idx, ans2_tok_idx):
+    def get_batch_scores(self, pred, ans1_tok_idx, ans2_tok_idx) -> tuple:
         """Calculate BLEU-1, BLEU4, METEOR and ROUGE_L for each entry in batch.
 
         Args:
@@ -317,19 +318,18 @@ class Trainer():
         # pred_: [batch, seq_len_ans]
 
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
-
+        # Calculate for each batch
         for p, a1, a2 in zip(pred_.tolist(), ans1_tok_idx.tolist(), ans2_tok_idx.tolist()):
-            p_  = ' '.join([self.vocab.itos[i - 1] for i in p if i > 0])
-            a1_ = ' '.join([self.vocab.itos[i - 1] for i in a1 if i > 0])
-            a2_ = ' '.join([self.vocab.itos[i - 1] for i in a2 if i > 0])
+            p  = ' '.join([self.vocab.itos(i - 1) for i in p  if i > 0])
+            a1 = ' '.join([self.vocab.itos(i - 1) for i in a1 if i > 0])
+            a2 = ' '.join([self.vocab.itos(i - 1) for i in a2 if i > 0])
 
-            bleu_1_1_, bleu_4_1_, meteor_1_, rouge_l_1_ = get_scores(p_, a1_)
-            bleu_1_2_, bleu_4_2_, meteor_2_, rouge_l_2_ = get_scores(p_, a2_)
+            bleu_1_, bleu_4_, meteor_, rouge_l_ = get_scores([a1, a2], p)
 
-            bleu_1  += (bleu_1_1_ + bleu_1_2_)/2
-            bleu_4  += (bleu_4_1_ + bleu_4_2_)/2
-            meteor  += (meteor_1_ + meteor_2_)/2
-            rouge_l += (rouge_l_1_+ rouge_l_2_)/2
+            bleu_1  += bleu_1_
+            bleu_4  += bleu_4_
+            meteor  += meteor_
+            rouge_l += rouge_l_
 
         return bleu_1, bleu_4, meteor, rouge_l
 
@@ -366,40 +366,31 @@ class Trainer():
                 dataset_valid.read_shard(valid_file)
                 n_samples   += len(dataset_valid)
 
-                iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch, shuffle=True)
+                iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch)
                 for batch in iterator_valid:
                     ques        = batch['ques'].to(args.device)
-                    ques_mask   = batch['ques_mask'].to(args.device)
-                    ans1        = batch['ans1'].to(args.device)
-                    ans2        = batch['ans2'].to(args.device)
-                    ans1_mask   = batch['ans1_mask'].to(args.device)
-                    paras       = batch['paras'].to(args.device)
-                    paras_len   = batch['paras_len'].to(args.device)
-                    paras_mask  = batch['paras_mask'].to(args.device)
-                    edge_indx   = batch['edge_indx'].to(args.device)
-                    edge_len    = batch['edge_len'].to(args.device)
-                    # ques      : [b, seq_len_ques]
-                    # ques_mask : [b, seq_len_ques]
-                    # paras     : [b, n_paras, seq_len_para]
-                    # paras_len : [b]
-                    # paras_mask: [b, n_paras, seq_len_para]
-                    # ans1      : [b, seq_len_ans]
-                    # ans2      : [b, seq_len_ans]
-                    # ans1_mask : [b, seq_len_ans]
-                    # edge_indx : [b, 2, n_edges]
-                    # edge_len  : [b]
+                    ques_len    = batch['ques_len']
+                    contx       = batch['contx'].to(args.device)
+                    contx_len   = batch['contx_len']
+                    ans         = batch['ans1'].to(args.device)
+                    ans_len     = batch['ans1_len']
+                    ans_mask    = batch['ans1_mask'].to(args.device)
+                    ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
+                    ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
 
-                    pred        = model(ques, ques_mask, ans1, ans1_mask,
-                                        paras, paras_len, paras_mask, edge_indx,
-                                        edge_len, is_inferring=True)
-                    # pred: [batch, seq_len_ans, d_vocab + seq_len_cntx]
+                    pred        = model(ques, ques_len, contx, contx_len,
+                                        ans, ans_len, ans_mask, is_inferring=True)
+                    # pred: [batch, seq_len_ans, d_vocab]
+                    pred_flat   = pred.view(-1, args.d_vocab)
+                    ans1_flat   = ans1_tok_idx.view(-1)
 
-                    pred        = transpose(pred)
-                    # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
-                    loss        = criterion(pred, ans1)
+                    loss        = criterion(pred_flat, ans1_flat)
+
+                    # Calculate loss
+                    loss_test   += loss.detach().item()
 
                     # Get batch score
-                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1, ans2)
+                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
 
                     bleu_1  += bleu_1_
                     bleu_4  += bleu_4_
@@ -412,6 +403,15 @@ class Trainer():
 
         logging.info(f"End validattion: bleu_1 {bleu_1/n_samples:.5f} | bleu_4 {bleu_4/n_samples:.5f} \
                      | meteor {meteor/n_samples:.5f} | rouge_l {rouge_l/n_samples:.5f}")
+
+        with open("eval_result.json", 'a+') as result_file:
+            json.dump({
+                'tag'   : "infer",
+                'bleu_1': bleu_1/n_samples,
+                'bleu_4': bleu_4/n_samples,
+                'meteor': meteor/n_samples,
+                'rouge_l': rouge_l/n_samples,
+            }, result_file, indent=2, ensure_ascii=False)
 
 if __name__ == '__main__':
     logging.info("* Start NarrativePipeline")

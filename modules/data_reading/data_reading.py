@@ -127,11 +127,11 @@ class DataReading():
                 else:
                     para.extend(sent_toks)
                     para_n_toks += len(sent_toks)
-            if para_n_toks:
+            if para_n_toks > 0:
                 paras   = np.append(paras, self.extract_para(para))
 
 
-            queue.put((key, paras))
+            queue.put((key, paras.tolist()))
 
 
     def process_ques_ans(self, text):
