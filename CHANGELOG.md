@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## Apr 29 2021, 11:20
+- Apply new *Beam Search* from *huggingface*
+- Add *Vectors* to class *Vocab*
+- Add some configs related to new *Beam Search*
+- Remove old file *utils_origin*
+
 ## Apr 27 2021, 15:25
 - Implement *Beam Search* and add to *TransDecoder* module
 - Reimplement *get_score* function to calculate *BLEU-1*, *BLEU-4*...

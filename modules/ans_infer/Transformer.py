@@ -2,10 +2,10 @@
 import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
-from torchtext.vocab import Vectors
 
-from modules.narrativepipeline.utils_origin import Vocab
-from modules.ans_infer.utils import BeamSearch
+from modules.narrativepipeline.utils import Vocab
+# from modules.ans_infer.utils import BeamSearch
+from modules.ans_infer.beam_search import BeamSearch
 from configs import args
 
 class TransDecoder(torch_nn.Module):
@@ -13,7 +13,6 @@ class TransDecoder(torch_nn.Module):
         super().__init__()
 
         self.vocab      = vocab
-        self.vectors    = Vectors("glove.6B.200d.txt", cache=".vector_cache/")
 
         self.d_hid1     = args.d_hid * 2
         self.d_embd     = args.d_embd
@@ -38,7 +37,7 @@ class TransDecoder(torch_nn.Module):
 
     def get_mask_sep(self, pred):
         # X : [b, seq_len_ans, d_vocab]
-        SEP_indx= self.vocab.stoi(self.vocab.SEP)
+        SEP_indx= self.vocab.stoi(self.vocab.sep)
 
         batch   = pred.shape[0]
 
@@ -93,65 +92,57 @@ class TransDecoder(torch_nn.Module):
             # pred= torch.cat((pred, pad), dim=1)
             # # [b, seq_len_ans, d_vocab]
 
-            # NOTE: During inferring using Beam Search, batch size = 1            
-            def infer(Y, tok_id):
-                # Y : [seq_len_contx, d_hid * 2]
-                Y      = Y.unsqueeze(0).transpose(0, 1)
-                # [seq_len_contx, b=1, d_hid*2]
+            def infer(tok_id, Y):
+                # tok_id : [batch_beam]
+                # Y      : [seq_len_contx, batch, d_hid * 2]
+                # [seq_len_contx, batch_beam, d_hid*2]
 
-                tok_emb = self.vectors.get_vecs_by_tokens([self.vocab.itos(tok_id)])\
-                                .view(1, 1, -1)\
-                                .to(args.device)
-                # [1, b=1, d_embd]
-                tok_emb = self.ff_ans(tok_emb)
-                # [1, b=1, d_hid*2]
+                # tok_emb = self.vocab.get_vecs_by_toks([self.vocab.itos(id_) for id_ in tok_id])\
+                #                 .to(args.device)
+                tok_emb = torch.FloatTensor(self.vocab.get_vecs_by_tokids(tok_id)).to(args.device)
+                # [batch_beam, d_embd]
+                tok_emb = self.ff_ans(tok_emb).unsqueeze(0)
+                # [1, batch_beam, d_hid*2]
 
                 output  = self.decoder(tok_emb, Y)
-                # [1, b=1, d_hid*2]
+                # [seq=1, batch_beam, d_hid*2]
 
                 output  = output.transpose(0, 1)  
-                # [b=1, 1, d_hid*2]
+                # [batch_beam, 1, d_hid*2]
 
                 output  = self.ff_pred(output)
-                # [b=1, 1, d_vocab]
-
-                output = torch_f.log_softmax(output.squeeze(), dim=0)
-                # [d_vocab]
+                # [batch_beam, 1, d_vocab]
 
                 return output
 
-            pred        = []
-            beam_search = BeamSearch(model=infer, init_tok=self.vocab.stoi(self.vocab.CLS))
+            # pred        = []
+            # beam_search = BeamSearch(max_depth=args.beam_depth, max_breadth=args.beam_breadth,
+            #                          model=infer, init_tok=self.vocab.stoi(self.vocab.cls),
+            #                          no_repeat_ngram_size=args.beam_ngram_repeat)
 
-            for b in range(batch):
-                indices = beam_search.search(Y[b, :, :])
-                pred_   = torch.zeros((self.seq_len_ans, self.d_vocab))
+            # for b in range(batch):
+            #     indices = beam_search.search(Y[b, :, :])
+            #     pred_   = torch.zeros((1, self.seq_len_ans, self.d_vocab))
 
-                for i, indx in enumerate(indices):
-                    pred_[i, indx]  = 1
+            #     for i, indx in enumerate(indices):
+            #         pred_[:, i, indx]  = 1
 
-                pred.append(pred_)
+            #     pred.append(pred_)
             
-            pred    = torch.vstack(pred).to(args.device)
+            # pred    = torch.vstack(pred).to(args.device)
             # [b, seq_len_ans, d_vocab]
+            Y_  = Y.repeat(args.beam_size, 1, 1)
+            beam_search = BeamSearch(self.vocab, infer)
+            result = beam_search.beam_search(batch, args.beam_size, (Y_,), self.max_len_ans,
+                                             1.6, False, args.beam_ngram_repeat)
 
         else:
-            # Add CLS embedding to ans
-            cls_emb = self.vectors.get_vecs_by_tokens(self.vocab.CLS)\
-                            .unsqueeze(0)\
-                            .to(args.device)
-            cls_emb = cls_emb.unsqueeze(0).repeat(1, batch, 1)
-            cls_emb = self.ff_ans(cls_emb)
-            # [1, b, d_hid1]
-
             Y       = Y.transpose(0, 1)
             # [seq_len_contx, b, d_hid1]
 
             # Use Teacher forcing with probability 100%
             ans     = self.ff_ans(ans).transpose(0, 1)
             # [seq_len_ans, b, d_embd]
-            ans     = torch.cat((cls_emb, ans), dim=0)
-            # [1 + seq_len_ans, b, d_embd]
 
             pred    = self.decoder(ans, Y)[:-1, :, :]
             # [seq_len_ans, b, d_hid1]

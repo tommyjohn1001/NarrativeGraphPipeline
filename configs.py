@@ -49,9 +49,13 @@ args.d_embd             = 200
 args.d_hid              = 256
 args.max_len_ans        = 12        # maximum inferring steps of decoder
 args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
-args.d_vocab            = 27150     # Vocab size
+args.d_vocab            = 27154     # Vocab size
 args.dropout            = 0.2
 args.n_layers           = 5
+# args.beam_depth         = 5
+# args.beam_breadth       = 10
+args.beam_size          = 10
+args.beam_ngram_repeat  = 5
 
 
 ###############################

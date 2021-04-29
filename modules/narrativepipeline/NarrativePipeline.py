@@ -7,7 +7,7 @@ import torch
 from transformers import AdamW
 
 
-from modules.narrativepipeline.utils_origin import CustomDataset, build_vocab_PGD, Vocab
+from modules.narrativepipeline.utils import CustomDataset, build_vocab_PGD, Vocab
 from modules.ans_infer.Transformer import TransDecoder
 from modules.utils import check_exist, get_scores
 from modules.Reasoning.IAL import IntrospectiveAlignmentLayer
@@ -151,10 +151,16 @@ class Trainer():
                 pred_flat   = pred.view(-1, args.d_vocab)
                 ans1_flat   = ans1_tok_idx.view(-1)
 
-
                 loss        = criterion(pred_flat, ans1_flat)
-
                 loss.backward()
+
+                # try:
+                #     loss        = criterion(pred_flat, ans1_flat)
+                #     loss.backward()
+                # except RuntimeError:
+                #     print(pred_flat)
+                #     print(ans1_flat)
+                #     exit()
                 torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=0.25)
                 optimizer.step()
                 scheduler.step()
@@ -176,7 +182,7 @@ class Trainer():
 
         with torch.no_grad():
             for eval_file in dataset_test.file_names:
-                logging.info(f"Eval with file: {eval_file}")
+                logging.info(f"Test with file: {eval_file}")
 
                 dataset_test.read_shard(eval_file)
                 iterator_test  = DataLoader(dataset_test, batch_size=args.batch)
@@ -191,6 +197,7 @@ class Trainer():
                     ans_len     = batch['ans1_len']
                     ans_mask    = batch['ans1_mask'].to(args.device)
                     ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
+                    ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
 
                     pred        = model(ques, ques_len, contx, contx_len,
                                         ans, ans_len, ans_mask, is_inferring=True)
@@ -202,6 +209,10 @@ class Trainer():
 
                     loss_test += loss.detach().item()
 
+
+                    ## Calculate metrics
+                    pred        = torch_f.log_softmax(pred.double(), dim=2)
+                    pred        = torch.argmax(pred, dim=2)
                     bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
 
                     bleu_1  += bleu_1_
@@ -214,7 +225,7 @@ class Trainer():
 
         with open("eval_result.json", 'a+') as result_file:
             json.dump({
-                'tag'   : "infer",
+                'tag'   : "test",
                 'bleu_1': bleu_1/n_samples,
                 'bleu_4': bleu_4/n_samples,
                 'meteor': meteor/n_samples,
@@ -229,9 +240,9 @@ class Trainer():
         # Load data
         ###############################
         dataset_train   = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "train"),
-                                       PATH['vocab_PGD'])
+                                       self.vocab)
         dataset_test    = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "test"),
-                                      PATH['vocab_PGD'])
+                                       self.vocab)
 
 
         ###############################
@@ -241,7 +252,7 @@ class Trainer():
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
         scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=0)
 
-        criterion   = torch_nn.CrossEntropyLoss(ignore_index=self.vocab.stoi(self.vocab.PAD))
+        criterion   = torch_nn.CrossEntropyLoss(ignore_index=self.vocab.stoi(self.vocab.pad))
 
         for p in model.parameters():
             if p.dim() > 1:
@@ -273,6 +284,7 @@ class Trainer():
 
             if loss_test > best_loss_test:
                 if dataset_train.n_exchange < args.n_paras:
+                    logging.info("Swtich Answerability.")
                     dataset_train.switch_answerability()
                 else:
                     # NOTE: Later, at this position switch_understandability() must be called
@@ -295,15 +307,22 @@ class Trainer():
         # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
         # ans_tok_idx: [batch, seq_len_ans]
 
-        pred_   = torch.argmax(torch_f.log_softmax(pred, 1), 1)
+        
         # pred_: [batch, seq_len_ans]
 
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
         # Calculate for each batch
-        for p, a1, a2 in zip(pred_.tolist(), ans1_tok_idx.tolist(), ans2_tok_idx.tolist()):
-            p  = ' '.join([self.vocab.itos(i - 1) for i in p  if i > 0])
-            a1 = ' '.join([self.vocab.itos(i - 1) for i in a1 if i > 0])
-            a2 = ' '.join([self.vocab.itos(i - 1) for i in a2 if i > 0])
+        for p, a1, a2 in zip(pred.tolist(), ans1_tok_idx.tolist(), ans2_tok_idx.tolist()):
+            p  = ' '.join([self.vocab.itos(i) for i in p  if i > 0])
+            a1 = ' '.join([self.vocab.itos(i) for i in a1 if i > 0])
+            a2 = ' '.join([self.vocab.itos(i) for i in a2 if i > 0])
+
+            if p == "":
+                p   = self.vocab.itos(0)
+
+            print(f"pred: {p}")
+            print(f"ans1: {a1}")
+            print(f"ans2: {a2}")
 
             bleu_1_, bleu_4_, meteor_, rouge_l_ = get_scores([a1, a2], p)
 
@@ -320,7 +339,7 @@ class Trainer():
         # Load data
         ###############################
         dataset_valid   = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "validation"),
-                                      PATH['vocab_PGD'])
+                                      self.vocab)
 
         ###############################
         # Defind model and associated stuffs
@@ -400,6 +419,6 @@ if __name__ == '__main__':
 
     narrative_pipeline  = Trainer()
 
-    # narrative_pipeline.trigger_train()
+    narrative_pipeline.trigger_train()
 
     narrative_pipeline.trigger_infer()

@@ -26,11 +26,11 @@ class BeamSearch():
     """
     def __init__(self,
         max_depth : int = 5,
-        max_breadth : int = 3,
+        max_breadth : int = 10,
         model = None,
         max_len : int = 12,
         init_tok: int = 0,
-        no_repeat_ngram_size: int = 3):
+        no_repeat_ngram_size: int = 5):
         self.max_depth      = max_depth
         self.max_breadth    = max_breadth
         self.model          = model
