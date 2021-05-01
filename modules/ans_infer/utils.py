@@ -84,7 +84,7 @@ class BeamSearch():
         if depth == max_depth:
             queue.append((accum_dist, accum_tok))
         else:
-            dist    = self.model(y, tok)
+            dist    = self.model(tok, y)
             # dist  : [d_vocab]
             # y     : [n_layers * 2, b=1, d_hid]
 

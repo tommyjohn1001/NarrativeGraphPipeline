@@ -105,10 +105,12 @@ class Vocab:
             else:
                 return self.glove_embd.get_vecs_by_tokens(self.itos(tok_id)).numpy()
 
+        if isinstance(toks, int):
+            return tokid_to_vec(toks)
         if isinstance(toks[0], int):
             return np.array(list(map(tokid_to_vec, toks)))
         elif isinstance(toks[0], list):
-            vecs    = [list(map(tokid_to_vec, toks)) for toks_ in toks]
+            vecs    = [list(map(tokid_to_vec, toks_)) for toks_ in toks]
 
             return np.array(vecs)
         else:
@@ -140,7 +142,7 @@ class CustomDataset(Dataset):
         self.contx          = None
         self.contx_len      = None
 
-        self.n_exchange     = 0
+        self.n_exchange     = args.n_paras // 2
 
 
     def __len__(self):
@@ -273,7 +275,10 @@ class CustomDataset(Dataset):
             self.contx_len.append(entry['contx_len'])
 
     def switch_answerability(self):
-        self.n_exchange += 1
+        if self.n_exchange == args.n_paras:
+            self.n_exchange == 0
+        else:
+            self.n_exchange += args.n_paras // 2
 
 
 

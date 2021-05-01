@@ -142,6 +142,7 @@ class Trainer():
                 ans_len      = batch['ans1_len']
                 ans_mask     = batch['ans1_mask'].to(args.device)
                 ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
+                ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
 
                 optimizer.zero_grad()
 
@@ -166,6 +167,12 @@ class Trainer():
                 scheduler.step()
 
                 loss_train += loss.detach().item()
+
+                ## Calculate metrics
+                pred        = torch_f.log_softmax(pred.double(), dim=2)
+                pred        = torch.argmax(pred, dim=2)
+                bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
+                exit
 
                 logging.info(f"  train: batch {nth_batch:4d} | loss: {loss:8.6f}")
                 nth_batch += 1
@@ -279,19 +286,15 @@ class Trainer():
         for nth_epoch in range(start_epoch, args.n_epochs):
             logging.info(f"= Epoch {nth_epoch}")
 
-            loss_train  = self.train(model, dataset_train, criterion, optimizer, scheduler)
+            # loss_train  = self.train(model, dataset_train, criterion, optimizer, scheduler)
             loss_test   = self.test(model, dataset_test, criterion)
 
-            if loss_test > best_loss_test:
-                if dataset_train.n_exchange < args.n_paras:
-                    logging.info("Swtich Answerability.")
-                    dataset_train.switch_answerability()
-                else:
-                    # NOTE: Later, at this position switch_understandability() must be called
-                    break
-            else:
-                best_loss_test = loss_test
-                self.save_model(model)
+            
+            logging.info("Switch Answerability.")
+            dataset_train.switch_answerability()
+
+            
+            self.save_model(model)
 
             logging.info(f"= Epoch {nth_epoch} finishes: loss_train {loss_train:.5f} | loss_test {loss_test:.5f}")
             self.save_checkpoint(model, optimizer, scheduler, nth_epoch)
@@ -320,9 +323,9 @@ class Trainer():
             if p == "":
                 p   = self.vocab.itos(0)
 
-            print(f"pred: {p}")
-            print(f"ans1: {a1}")
-            print(f"ans2: {a2}")
+            # print(f"pred: {p}")
+            # print(f"ans1: {a1}")
+            # print(f"ans2: {a2}")
 
             bleu_1_, bleu_4_, meteor_, rouge_l_ = get_scores([a1, a2], p)
 

@@ -4,8 +4,8 @@ import torch.nn as torch_nn
 import torch
 
 from modules.narrativepipeline.utils import Vocab
-# from modules.ans_infer.utils import BeamSearch
-from modules.ans_infer.beam_search import BeamSearch
+from modules.ans_infer.utils import BeamSearch
+# from modules.ans_infer.beam_search import BeamSearch
 from configs import args
 
 class TransDecoder(torch_nn.Module):
@@ -70,71 +70,62 @@ class TransDecoder(torch_nn.Module):
         batch   = ans_mask.shape[0]
 
         if is_inferring:
-            # pred    = torch.zeros((batch, self.max_len_ans, self.d_vocab)).to(args.device)
-
-            # last_tok= cls_emb
-            # for i in range(self.max_len_ans):
-
-            #     output  = self.decoder(last_tok, Y)
-            #     # [1, b, d_hid1]
-
-            #     last_tok= output
-
-            #     output  = output.transpose(0, 1)  
-            #     # [b, 1, d_hid1]
-
-            #     output  = self.ff_pred(output)
-            #     # [b, 1, d_vocab]
-
-            #     pred[:, i, :] = output.squeeze(1)
-
-            # pad = torch.zeros((batch, self.seq_len_ans - self.max_len_ans, self.d_vocab)).to(args.device)
-            # pred= torch.cat((pred, pad), dim=1)
-            # # [b, seq_len_ans, d_vocab]
-
             def infer(tok_id, Y):
-                # tok_id : [batch_beam]
-                # Y      : [seq_len_contx, batch, d_hid * 2]
-                # [seq_len_contx, batch_beam, d_hid*2]
+                # Y : [seq_len_contx, d_hid * 2]
+                Y      = Y.unsqueeze(0).transpose(0, 1)
+                # [seq_len_contx, b=1, d_hid*2]
 
-                # tok_emb = self.vocab.get_vecs_by_toks([self.vocab.itos(id_) for id_ in tok_id])\
-                #                 .to(args.device)
-                tok_emb = torch.FloatTensor(self.vocab.get_vecs_by_tokids(tok_id)).to(args.device)
-                # [batch_beam, d_embd]
-                tok_emb = self.ff_ans(tok_emb).unsqueeze(0)
-                # [1, batch_beam, d_hid*2]
+                tok_emb = torch.FloatTensor(self.vocab.get_vecs_by_tokids(tok_id))\
+                            .view(1, 1, -1)\
+                            .to(args.device)
+                # [seq=1, b=1, d_embd]
+                tok_emb = self.ff_ans(tok_emb)
+                # [seq=1, b=1, d_hid*2]
 
                 output  = self.decoder(tok_emb, Y)
-                # [seq=1, batch_beam, d_hid*2]
+                # [1, b=1, d_hid*2]
 
                 output  = output.transpose(0, 1)  
-                # [batch_beam, 1, d_hid*2]
+                # [b=1, 1, d_hid*2]
 
                 output  = self.ff_pred(output)
-                # [batch_beam, 1, d_vocab]
+                # [b=1, 1, d_vocab]
+
+                output = torch_f.log_softmax(output.squeeze(), dim=0)
+                # [d_vocab]
 
                 return output
 
-            # pred        = []
-            # beam_search = BeamSearch(max_depth=args.beam_depth, max_breadth=args.beam_breadth,
-            #                          model=infer, init_tok=self.vocab.stoi(self.vocab.cls),
-            #                          no_repeat_ngram_size=args.beam_ngram_repeat)
+            pred        = []
+            beam_search = BeamSearch(model=infer, init_tok=self.vocab.cls_id)
 
-            # for b in range(batch):
-            #     indices = beam_search.search(Y[b, :, :])
-            #     pred_   = torch.zeros((1, self.seq_len_ans, self.d_vocab))
+            for b in range(batch):
+                indices = beam_search.search(Y[b, :, :])
+                print(self.vocab.itos(indices))
+                pred_   = torch.zeros((self.seq_len_ans, self.d_vocab))
 
-            #     for i, indx in enumerate(indices):
-            #         pred_[:, i, indx]  = 1
+                for i, indx in enumerate(indices):
+                    pred_[i, indx]  = 1
 
-            #     pred.append(pred_)
+                
+
+                pred.append(pred_)
             
-            # pred    = torch.vstack(pred).to(args.device)
+            pred    = torch.vstack(pred).to(args.device)
             # [b, seq_len_ans, d_vocab]
-            Y_  = Y.repeat(args.beam_size, 1, 1)
-            beam_search = BeamSearch(self.vocab, infer)
-            result = beam_search.beam_search(batch, args.beam_size, (Y_,), self.max_len_ans,
-                                             1.6, False, args.beam_ngram_repeat)
+
+            # Y_          = Y.repeat(args.beam_size, 1, 1)
+            # beam_search = BeamSearch(self.vocab, infer)
+            # pred        = beam_search.beam_search(batch, args.beam_size, (Y_,), self.max_len_ans,
+            #                                  1.6, False, args.beam_ngram_repeat)
+            # # [b, max_len_ans]
+            # tmp         = torch.full((batch, self.seq_len_ans, self.d_vocab), self.vocab.pad_id)
+            # for b in range(batch):
+            #     for s in range(pred.shape[1]):
+            #         tmp[b, s, pred[b, s]] = 1
+            
+            # pred        = tmp.to(args.device)
+            # [b, seq_len_ans, d_vocab]
 
         else:
             Y       = Y.transpose(0, 1)
@@ -144,7 +135,7 @@ class TransDecoder(torch_nn.Module):
             ans     = self.ff_ans(ans).transpose(0, 1)
             # [seq_len_ans, b, d_embd]
 
-            pred    = self.decoder(ans, Y)[:-1, :, :]
+            pred    = self.decoder(ans, Y)
             # [seq_len_ans, b, d_hid1]
             pred    = pred.transpose(0, 1)
             # [b, seq_len_ans, d_hid1]

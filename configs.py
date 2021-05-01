@@ -52,16 +52,16 @@ args.min_count_PGD      = 10        # min occurences of word to be added to voca
 args.d_vocab            = 27154     # Vocab size
 args.dropout            = 0.2
 args.n_layers           = 5
-# args.beam_depth         = 5
-# args.beam_breadth       = 10
-args.beam_size          = 10
+args.beam_depth         = 5
+args.beam_breadth       = 6
+args.beam_size          = 20
 args.beam_ngram_repeat  = 5
 
 
 ###############################
 # Config logging
 ###############################
-logging.basicConfig(format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
+logging.basicConfig(filename='app.log', filemode='a+', format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
 logging.getLogger().setLevel(logging.INFO)
 
 ###############################
