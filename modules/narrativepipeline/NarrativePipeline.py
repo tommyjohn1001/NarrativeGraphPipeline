@@ -7,7 +7,7 @@ import torch
 from transformers import AdamW
 
 
-from modules.narrativepipeline.utils import CustomDataset, build_vocab_PGD, Vocab
+from modules.narrativepipeline.utils import CustomDataset, build_vocab, Vocab
 # from modules.ans_infer.PointerGeneratorDecoder import PointerGeneratorDecoder
 from modules.ans_infer.Transformer import TransDecoder
 from modules.utils import check_exist, get_scores
@@ -86,11 +86,11 @@ class Trainer():
         # Build vocab for PointerGeneratorDecoder
         ################################
         logging.info("Preparation: Build vocab for PGD")
-        if not check_exist(PATH['vocab_PGD']):
-            build_vocab_PGD()
+        if not check_exist(PATH['vocab']):
+            build_vocab()
 
 
-        self.vocab  = Vocab(PATH['vocab_PGD'])
+        self.vocab  = Vocab(PATH['vocab'])
 
     def save_model(self, model):
         """
@@ -113,7 +113,7 @@ class Trainer():
 
         return model
 
-    def save_checkpoint(self, model, optimizer, scheduler, epoch):
+    def save_checkpoint(self, model, optimizer, scheduler, epoch, best_loss_test):
         """Save training checkpoint.
 
         Args:
@@ -124,10 +124,11 @@ class Trainer():
         """
         torch.save(
             {
-               'epoch'      : epoch,
-               'model_state': model.state_dict(),
-               'optim_state': optimizer.state_dict(),
-               'sched_state': scheduler.state_dict()
+               'epoch'          : epoch,
+               'model_state'    : model.state_dict(),
+               'optim_state'    : optimizer.state_dict(),
+               'sched_state'    : scheduler.state_dict(),
+               'best_loss_test' : best_loss_test
             }, PATH['saved_chkpoint'])
 
     def load_checkpoint(self):
@@ -210,6 +211,7 @@ class Trainer():
                     ans_len     = batch['ans1_len']
                     ans_mask    = batch['ans1_mask'].to(args.device)
                     ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
+                    ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
 
                     pred        = model(ques, ques_len, contx, contx_len,
                                         ans, ans_len, ans_mask, is_inferring=True)
@@ -231,7 +233,7 @@ class Trainer():
                     logging.info(f"  test: batch {nth_batch:4d} | loss: {loss:8.6f}")
                     nth_batch += 1
 
-        with open("eval_result.json", 'a+') as result_file:
+        with open(PATH["eval_result"], 'a+') as result_file:
             json.dump({
                 'tag'   : "infer",
                 'bleu_1': bleu_1/n_samples,
@@ -248,9 +250,9 @@ class Trainer():
         # Load data
         ###############################
         dataset_train   = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "train"),
-                                       PATH['vocab_PGD'])
+                                       PATH['vocab'])
         dataset_test    = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "test"),
-                                      PATH['vocab_PGD'])
+                                      PATH['vocab'])
 
 
         ###############################
@@ -266,7 +268,8 @@ class Trainer():
             if p.dim() > 1:
                 torch_nn.init.xavier_uniform_(p)
 
-        start_epoch = 0
+        start_epoch     = 0
+        best_loss_test  = 10e10
 
         # Check if previous checkpoint available
         if check_exist(PATH['saved_model']):
@@ -277,31 +280,29 @@ class Trainer():
             model.load_state_dict(states['model_state'])
             optimizer.load_state_dict(states['optim_state'])
             scheduler.load_state_dict(states['sched_state'])
-            start_epoch = states['epoch']
+            start_epoch     = states['epoch']
+            best_loss_test  = states['best_loss_test']
 
 
         ###############################
         # Start training
         ###############################
-        best_loss_test  = 10e10
+
         for nth_epoch in range(start_epoch, args.n_epochs):
             logging.info(f"= Epoch {nth_epoch}")
 
             loss_train  = self.train(model, dataset_train, criterion, optimizer, scheduler)
             loss_test   = self.test(model, dataset_test, criterion)
 
-            if loss_test > best_loss_test:
-                if dataset_train.n_exchange < args.n_paras:
-                    dataset_train.switch_answerability()
-                else:
-                    # NOTE: Later, at this position switch_understandability() must be called
-                    break
-            else:
+            logging.info("Switch Answerability.")
+            dataset_train.switch_answerability()
+            if loss_test < best_loss_test:
                 best_loss_test = loss_test
                 self.save_model(model)
+            self.save_model(model)
 
             logging.info(f"= Epoch {nth_epoch} finishes: loss_train {loss_train:.5f} | loss_test {loss_test:.5f}")
-            self.save_checkpoint(model, optimizer, scheduler, nth_epoch)
+            self.save_checkpoint(model, optimizer, scheduler, nth_epoch, best_loss_test)
 
 
     def get_batch_scores(self, pred, ans1_tok_idx, ans2_tok_idx) -> tuple:
@@ -320,9 +321,9 @@ class Trainer():
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
         # Calculate for each batch
         for p, a1, a2 in zip(pred_.tolist(), ans1_tok_idx.tolist(), ans2_tok_idx.tolist()):
-            p  = ' '.join([self.vocab.itos(i - 1) for i in p  if i > 0])
-            a1 = ' '.join([self.vocab.itos(i - 1) for i in a1 if i > 0])
-            a2 = ' '.join([self.vocab.itos(i - 1) for i in a2 if i > 0])
+            p  = ' '.join([self.vocab.itos(i) for i in p  if i > 0])
+            a1 = ' '.join([self.vocab.itos(i) for i in a1 if i > 0])
+            a2 = ' '.join([self.vocab.itos(i) for i in a2 if i > 0])
 
             bleu_1_, bleu_4_, meteor_, rouge_l_ = get_scores([a1, a2], p)
 
@@ -339,7 +340,7 @@ class Trainer():
         # Load data
         ###############################
         dataset_valid   = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "validation"),
-                                      PATH['vocab_PGD'])
+                                      PATH['vocab'])
 
         ###############################
         # Defind model and associated stuffs
@@ -404,7 +405,7 @@ class Trainer():
         logging.info(f"End validattion: bleu_1 {bleu_1/n_samples:.5f} | bleu_4 {bleu_4/n_samples:.5f} \
                      | meteor {meteor/n_samples:.5f} | rouge_l {rouge_l/n_samples:.5f}")
 
-        with open("eval_result.json", 'a+') as result_file:
+        with open(PATH["eval_result"], 'a+') as result_file:
             json.dump({
                 'tag'   : "infer",
                 'bleu_1': bleu_1/n_samples,

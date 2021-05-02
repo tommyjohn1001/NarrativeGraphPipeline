@@ -1,3 +1,5 @@
+import re
+
 import torch.nn as torch_nn
 import torch
 
@@ -11,11 +13,11 @@ class AttentivePooling(torch_nn.Module):
         self.linear = torch_nn.Linear(dim, 1)
 
     def forward(self, X):
-        # X: [batch, x, dim]
+        # X: [batch, y, dim]
 
         X_      = torch.tanh(X)
         alpha   = torch.softmax(self.linear(X_), dim=1)
-        # alpha: [batch, x, 1]
+        # alpha: [batch, y, 1]
         r       = torch.bmm(transpose(X), alpha)
         # r: [batch, dim, 1]
 
@@ -26,146 +28,122 @@ class BeamSearch():
     """
     def __init__(self,
         max_depth : int = 5,
-        max_breadth : int = 3,
-        model : torch.nn.Module = None,
+        max_breadth : int = 5,
+        model = None,
         max_len : int = 12,
         init_tok: int = 0,
-        no_repeat_ngram_size: int = 3):
+        stop_tok: int = 2,
+        no_repeat_ngram_size: int = 5,
+        early_stop: bool = False):
         self.max_depth      = max_depth
         self.max_breadth    = max_breadth
         self.model          = model
         self.max_len        = max_len
         self.init_tok       = init_tok
+        self.stop_tok       = stop_tok
+        self.early_stop     = early_stop
         self.ngram_nonrepeat= no_repeat_ngram_size
 
-    def search(self, X: torch.Tensor):
+
+    def search(self, Y: torch.Tensor):
         """Start Beam search given tensor X which is result from previous model
 
         Args:
-            X (torch.Tensor): Result tensfor from previous model
+            Y (torch.Tensor): Result tensfor from previous model
         """
-        queue   = []
-        i           = 0
-        tok         = self.init_tok
-        x           = X
-        prob        = 0
-        pred        = [tok]
-        while i < self.max_len:
-            max_depth   = min([self.max_len - i, self.max_depth])
-            self.backtrack(max_depth, queue, tok, x, 0, prob, pred)
+        # Y: [seq_len_contx, d_hid * 2]
 
-            max_prob, max_branch = -10e10, None
-            for prob, branch in queue:
-                if prob > max_prob:
-                    max_prob, max_branch = prob, branch
+        nth_depth   = 0
+        queue       = []
+        final_beams = [] # this list contains beams in leaves node of beam search tree
 
-            pred    = max_branch
+        # Initiate
+        queue.append((0, 0, (self.init_tok, )))
+        while nth_depth < self.max_len:
+            print(nth_depth)
+            max_depth   = min([self.max_len - nth_depth, self.max_depth])
 
-            i       += max_depth
-            queue.clear()
-            tok     = pred[-1]
-            prob    = max_prob
+            # Do a Beam Search
+            while len(queue) != 0:
+                depth, accum_prob, beam = queue.pop(0)
+                if depth == max_depth:
+                    final_beams.append((accum_prob, beam))
+                    continue
 
-            for token in max_branch:
-                _, x    = self.model(torch.LongTensor([token]), x)
-
-        print(pred)
+                # Pass beam through model to
+                output  = self.model(beam, Y)[-1, :]
+                # [d_vocab]
 
 
-    def backtrack(self, max_depth, queue: list, tok, x, depth, accum_dist: float, accum_tok: list):
-        """Backtrack to every nodes of beam search tree.
+                disable_words = set()
+
+                # Within n_gram_nonpreeat words, no 2 words are the same
+                for n in range(1, min([self.ngram_nonrepeat - 1, len(beam)])):
+                    disable_words.add(beam[-n])
+
+                # Form n-1 gram from n - 1 previous words
+                if self.ngram_nonrepeat < len(beam):
+                    sub_gram = beam[-self.ngram_nonrepeat + 1:]
+                else:
+                    sub_gram = None
+
+                # Find all next words of sub_gram in beam
+                if sub_gram:
+                    list_next = self.find_next(sub_gram, beam)
+
+                    disable_words = disable_words | list_next
+
+                # Disable all words in disable list
+                for word in disable_words:
+                    output[word] = 0
+
+                # Calculate log_softmax and topk
+                distribution        = torch.log_softmax(output, dim=0)
+                topk_dist, topk_tok = torch.topk(distribution, self.max_breadth, 0)
+                # topk_dist, topk_tok: [max_breadth]
+
+                # for each dis and token in top-k, create new beam
+                for dist_, tok_ in zip(topk_dist, topk_tok):
+                    accum_dist_ = accum_prob + dist_.item()
+                    new_beam    = beam  + (tok_.item(),)
+
+                    if self.early_stop and tok_.item() == self.stop_tok:
+                        queue.append((max_depth, accum_dist_, new_beam))
+                    else:
+                        queue.append((depth + 1, accum_dist_, new_beam))
+
+            # Apply greedy method: Find best beam among found ones
+            max_pair = max(final_beams, key=lambda pair: pair[0])
+            final_beams.clear()
+            queue.append((0, 0, max_pair[1]))
+
+            nth_depth   += max_depth
+
+        return max_pair[1][1:]
+
+    def find_next(self, sub_list: list, main_list: list) -> list:
+        """Find all occurences of sub_list in main_list and return the number next to the sub_list in main_list.
 
         Args:
-            max_depth (int): [description]
-            queue (list): [description]
-            tok ([type]): [description]
-            x ([type]): [description]
-            depth ([type]): [description]
-            accum_dist (float): [description]
-            accum_tok (list): [description]
+            sub_list (list): list to check
+            main_list (list): list to be checked
+
+        Returns:
+            list: list of all next numbers of sub_list in main_list
         """
-        if depth == max_depth:
-            queue.append((accum_dist, accum_tok))
-        else:
-            dist, x_    = self.model(torch.LongTensor([tok]), x)
-            # dist  : [d_vocab]
-            # x     : [n_layers * 2, b=1, d_hid]
+        sub_    = ' '.join(map(str, sub_list))
+        main_   = ' '.join(map(str, main_list))
 
-            ## Set current word not match with any previous ngram - 1 words
-            for i in range(1, min([self.ngram_nonrepeat, len(accum_tok)]) + 1):
-                dist[accum_tok[-i]] = -10e10
+        n_num_sub = sub_.count(' ')
 
-            ## Set n-gram not match
-            if len(accum_tok) > self.ngram_nonrepeat:
-                for tok_ in self.KMPSearch(accum_tok[-(self.ngram_nonrepeat - 1):], accum_tok):
-                    dist[tok_] = -10e10
+        list_next = []
+        for m in re.finditer(sub_, main_):
+            idx = m.start()
 
-            topk_dist, topk_tok = torch.topk(dist, self.max_breadth, 0)
-            # topk_dist, topk_tok: [max_breadth]
+            n_nums_main = main_[:idx].count(' ')
 
+            next_num = n_num_sub + n_nums_main + 1
+            if next_num < len(main_list):
+                list_next.append(main_list[next_num])
 
-            for dist_, tok_ in zip(topk_dist, topk_tok):
-                accum_dist_ = accum_dist + dist_.item()
-                accum_tok_  = accum_tok  + [tok_.item()]
-                self.backtrack(max_depth, queue, tok_, x_, depth + 1, accum_dist_, accum_tok_)
-
-    def KMPSearch(self, pat, txt):
-        def computeLPSArray(pat, M, lps):
-            len = 0 # length of the previous longest prefix suffix
-        
-            lps[0] # lps[0] is always 0
-            i = 1
-        
-            # the loop calculates lps[i] for i = 1 to M-1
-            while i < M:
-                if pat[i]== pat[len]:
-                    len += 1
-                    lps[i] = len
-                    i += 1
-                else:
-                    # This is tricky. Consider the example.
-                    # AAACAAAA and i = 7. The idea is similar 
-                    # to search step.
-                    if len != 0:
-                        len = lps[len-1]
-        
-                        # Also, note that we do not increment i here
-                    else:
-                        lps[i] = 0
-                        i += 1
-
-        list_nodes  = []
-        M = len(pat)
-        N = len(txt)
-    
-        # create lps[] that will hold the longest prefix suffix 
-        # values for pattern
-        lps = [0]*M
-        j = 0 # index for pat[]
-    
-        # Preprocess the pattern (calculate lps[] array)
-        computeLPSArray(pat, M, lps)
-    
-        i = 0 # index for txt[]
-        while i < N:
-            if pat[j] == txt[i]:
-                i += 1
-                j += 1
-    
-            if j == M:
-                # print(f"Found pattern at index {i-j}, right next: {i-j+M} is {txt[i-j+M]}")
-                if i-j+M < N:
-                    list_nodes.append(txt[i-j+M])
-                j = lps[j-1]
-    
-            # mismatch after j matches
-            elif i < N and pat[j] != txt[i]:
-                # Do not match lps[0..lps[j-1]] characters,
-                # they will match anyway
-                if j != 0:
-                    j = lps[j-1]
-                else:
-                    i += 1
-
-        return list_nodes
-
+        return set(list_next)

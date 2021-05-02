@@ -2,6 +2,13 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 2 2021, 21:18
+- Reimplement *BeamSearch* by simplifiyng many steps
+- Switching context now occurs forcibly after training an epoch
+- Process in module "DataReading" now runs on single process
+- Function *build_vocab* adds special tokens to vocab file
+
+
 ## Apr 25 2021, 16:18
 - Reimplement function calculating *ROUGE-L*, *BLEU-1*...
 - Implement *Beam Search*

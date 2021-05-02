@@ -5,6 +5,7 @@ from itertools import combinations
 import glob, ast, gc, json
 
 from torch.utils.data import Dataset
+from torchtext.vocab import Vectors
 import torch
 from datasets import load_dataset
 from transformers import BertTokenizer
@@ -20,20 +21,25 @@ from configs import logging, args, PATH
 class Vocab:
     def __init__(self, path_vocab=None) -> None:
         if path_vocab is None:
-            path_vocab  =PATH['vocab_PGD']
+            path_vocab  =PATH['vocab']
+
+        self.glove_embd = Vectors("glove.6B.200d.txt", cache=".vector_cache/")
 
         self.dict_stoi   = dict()
         self.dict_itos   = dict()
 
-        self.PAD = "[PAD]"
-        self.CLS = "[CLS]"
-        self.SEP = "[SEP]"
-        self.UNK = "[UNK]"
-
-        # Add special tokens
-        for ith, word in enumerate([self.PAD, self.CLS, self.SEP, self.UNK]):
-            self.dict_stoi[word] = ith
-            self.dict_itos[ith]  = word
+        self.pad    = "[pad]"
+        self.cls    = "[cls]"
+        self.sep    = "[sep]"
+        self.unk    = "[unk]"
+        self.pad_id = 0
+        self.cls_id = 1
+        self.sep_id = 2
+        self.unk_id = 3
+        self.pad_vec= np.full((200,), 0)
+        self.cls_vec= np.full((200,), 1)
+        self.sep_vec= np.full((200,), 2)
+        self.unk_vec= np.full((200,), 3)
 
         # Construct vocab from token list file
         with open(path_vocab, 'r') as vocab_file:
@@ -50,20 +56,67 @@ class Vocab:
         try:
             id_ = self.dict_stoi[tok]
         except KeyError:
-            id_ = self.dict_stoi[self.UNK]
+            id_ = self.dict_stoi[self.unk]
 
         return id_
 
-    def itos(self, id_):
-        try:
-            tok = self.dict_itos[id_]
-        except KeyError:
-            tok = self.UNK
+    def itos(self, ids):
+        def id_to_s(id_):
+            try:
+                tok = self.dict_itos[id_]
+            except KeyError:
+                tok = self.unk
 
-        return tok
+            return tok
+        
+        if isinstance(ids, torch.Tensor) or isinstance(ids, np.ndarray):
+            ids    = ids.tolist()
+
+        
+        if isinstance(ids, int):
+            return id_to_s(ids)
+        if isinstance(ids[0], int):
+            return list(map(id_to_s, ids))
+        elif isinstance(ids[0], list):
+            return [list(map(id_to_s, ids_)) for ids_ in ids]
+        else:
+            raise TypeError(f"'ids' must be 'list' or 'int' type. Got {type(ids)}")
 
     def convert_tokens_to_ids(self, toks: list):
         return list(map(self.stoi, toks))
+
+    def get_vecs_by_toks(self, toks):
+        return self.glove_embd.get_vecs_by_tokens(toks).numpy()
+
+    def get_vecs_by_tokids(self, toks):
+        if isinstance(toks, torch.Tensor) or isinstance(toks, np.ndarray):
+            toks    = toks.tolist()
+
+        def tokid_to_vec(tok_id):
+            if tok_id == self.pad_id:
+                return self.pad_vec
+            elif tok_id == self.cls_id:
+                return self.cls_vec
+            elif tok_id == self.sep_id:
+                return self.sep_vec
+            elif tok_id == self.unk_id:
+                return self.unk_vec
+            else:
+                return self.glove_embd.get_vecs_by_tokens(self.itos(tok_id)).numpy()
+
+        if isinstance(toks, int):
+            return tokid_to_vec(toks)
+        if isinstance(toks[0], int):
+            return np.array(list(map(tokid_to_vec, toks)))
+        elif isinstance(toks[0], list):
+            vecs    = [list(map(tokid_to_vec, toks_)) for toks_ in toks]
+
+            return np.array(vecs)
+        else:
+            raise TypeError(f"'toks' must be 'list' or 'int' type. Got {type(toks)}")
+
+    def padding(self, l, max_len):
+        return l + [self.pad]*(max_len - len(l)), len(l)
 
 class CustomDataset(Dataset):
     def __init__(self, path_csv_dir, path_vocab):
@@ -323,8 +376,8 @@ class CustomDataset(Dataset):
 
 
 
-def build_vocab_PGD():
-    """ Build vocab for Pointer Generator Decoder. """
+def build_vocab():
+    """ Build vocab for Decoder. """
     log = logging.getLogger("spacy")
     log.setLevel(logging.ERROR)
 
@@ -370,6 +423,9 @@ def build_vocab_PGD():
     words = words.union(answer_toks)
 
     # Write vocab to TXT file
-    with open(PATH['vocab_PGD'], 'w+') as vocab_file:
+    with open(PATH['vocab'], 'w+') as vocab_file:
+        for word in ["[pad]", "[cls]", "[sep]", "[unk]"]:
+            vocab_file.write(word + '\n')
+
         for word in words:
             vocab_file.write(word + '\n')

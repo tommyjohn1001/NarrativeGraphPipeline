@@ -72,7 +72,8 @@ PATH    = {
     ## Paths associated with Data Reading
     'dataset_para'      : "backup/[SPLIT]/data_[SHARD].csv",
     'processed_contx'   : "backup/proc_contx_[SPLIT].json",
-    'vocab_PGD'         : "backup/vocab_PGD.txt",
+    'vocab'             : "backup/vocab.txt",
     'saved_model'       : "backup/model.pt",
-    'saved_chkpoint'    : "backup/chkpoint.pth.tar"
+    'saved_chkpoint'    : "backup/chkpoint.pth.tar",
+    'eval_result'       : "backup/eval_result.json"
 }

@@ -6,6 +6,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from datasets import load_dataset
 from bs4 import BeautifulSoup
+from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import spacy
@@ -230,6 +231,59 @@ class DataReading():
                 'En'        : [paras[i] for i in golden_paras_answ],
                 'Hn'        : [paras[i] for i in golden_paras_ques]
             })
+    def process_entry_pool(self, entry):
+        """This function is used to run in parallel to read and initially preprocess
+        raw documents. Afterward, it puts a dict containing result into queue.
+
+        Args:
+            document (dict): a document of dataset
+        """
+        processed_contx = self.processed_contx
+
+        #########################
+        ## Preprocess context
+        #########################
+        paras   = processed_contx[entry['document']['id']]
+
+
+        #########################
+        ## Preprocess question and answer
+        #########################
+        ques    = self.process_ques_ans(entry['question']['text'])
+        ans1    = self.process_ques_ans(entry['answers'][0]['text'])
+        answ2   = self.process_ques_ans(entry['answers'][1]['text'])
+
+
+        #########################
+        ## TfIdf vectorize
+        #########################
+        tfidfvectorizer = TfidfVectorizer(analyzer='word', stop_words='english',
+                                            ngram_range=(1, 3), max_features=500000)
+
+        wm = tfidfvectorizer.fit_transform(paras + [ques, ans1, answ2]).toarray()
+
+        question, answer1, answer2 = len(wm) - 3, len(wm) - 2, len(wm) - 1
+
+
+        #########################
+        ## Find golden paragraphs from
+        ## question and answers
+        #########################
+        golden_paras_ques   = self.find_golden(question, wm)
+
+        golden_paras_answ1  = self.find_golden(answer1, wm)
+        golden_paras_answ2  = self.find_golden(answer2, wm)
+        golden_paras_answ   = golden_paras_answ1 | golden_paras_answ2
+
+
+
+        return {
+            'doc_id'    : entry['document']['id'],
+            'question'  : ' '.join(entry['question']['tokens']),
+            'answers'   : [' '.join(x['tokens']) for x in entry['answers']],
+            'En'        : [paras[i] for i in golden_paras_answ],
+            'Hn'        : [paras[i] for i in golden_paras_ques]
+        }
 
 
     def trigger_reading_data(self):
@@ -290,17 +344,14 @@ class DataReading():
             #########################
             # Process each entry of dataset
             #########################
-            shared_dict = Manager().dict()
-            shared_dict.update(self.processed_contx)
-            list_documents  = ParallelHelper(self.process_entry, dataset,
-                                             lambda d, l, h: d.select(range(l,h)),
-                                             args.num_proc, shared_dict).launch()
+            dataset = map(self.process_entry_pool, tqdm(dataset))
 
-            save_object(path, pd.DataFrame(list_documents))
+            save_object(path, pd.DataFrame(dataset))
+
 
 
 if __name__ == '__main__':
     logging.info("* Reading raw data and decompose into paragraphs")
 
-    for splt in ['test']:
+    for splt in ['test', 'train', 'validation']:
         DataReading(splt).trigger_reading_data()
