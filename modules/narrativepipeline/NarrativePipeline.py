@@ -20,7 +20,7 @@ class  NarrativePipeline(torch_nn.Module):
 
         self.embd_layer = FineGrain()
         self.reasoning  = IntrospectiveAlignmentLayer()
-        self.ans_infer  = TransDecoder(vocab)
+        self.ans_infer  = TransDecoder(vocab, self.embd_layer.embedding)
 
     def forward(self, ques, ques_mask, ans, ans_mask,
                 paras, paras_mask, is_inferring=False):
@@ -133,11 +133,11 @@ class Trainer():
 
             for batch in iterator_train:
                 ques         = batch['ques'].to(args.device)
-                ques_mask    = batch['ques_mask']
+                ques_mask    = batch['ques_mask'].to(args.device)
                 ans1         = batch['ans1'].to(args.device)
                 ans1_mask    = batch['ans1_mask'].to(args.device)
                 paras        = batch['paras'].to(args.device)
-                paras_mask   = batch['paras_mask']
+                paras_mask   = batch['paras_mask'].to(args.device)
 
                 optimizer.zero_grad()
 
@@ -179,12 +179,12 @@ class Trainer():
 
                 for batch in iterator_test:
                     ques         = batch['ques'].to(args.device)
-                    ques_mask    = batch['ques_mask']
+                    ques_mask    = batch['ques_mask'].to(args.device)
                     ans1         = batch['ans1'].to(args.device)
                     ans2         = batch['ans2'].to(args.device)
                     ans1_mask    = batch['ans1_mask'].to(args.device)
                     paras        = batch['paras'].to(args.device)
-                    paras_mask   = batch['paras_mask']
+                    paras_mask   = batch['paras_mask'].to(args.device)
 
                     pred        = model(ques, ques_mask, ans1, ans1_mask,
                                         paras, paras_mask, is_inferring=True)
@@ -353,12 +353,12 @@ class Trainer():
                 iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch)
                 for batch in iterator_valid:
                     ques         = batch['ques'].to(args.device)
-                    ques_mask    = batch['ques_mask']
+                    ques_mask    = batch['ques_mask'].to(args.device)
                     ans1         = batch['ans1'].to(args.device)
                     ans2         = batch['ans2'].to(args.device)
                     ans1_mask    = batch['ans1_mask'].to(args.device)
                     paras        = batch['paras'].to(args.device)
-                    paras_mask   = batch['paras_mask']
+                    paras_mask   = batch['paras_mask'].to(args.device)
 
                     pred        = model(ques, ques_mask, ans1, ans1_mask,
                                         paras, paras_mask, is_inferring=True)

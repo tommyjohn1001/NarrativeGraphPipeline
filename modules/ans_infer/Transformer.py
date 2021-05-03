@@ -1,4 +1,5 @@
 
+from transformers import BertModel
 import torch.nn as torch_nn
 import torch
 
@@ -7,7 +8,7 @@ from modules.ans_infer.utils import BeamSearch
 from configs import args
 
 class TransDecoder(torch_nn.Module):
-    def __init__(self, vocab: Vocab) -> None:
+    def __init__(self, vocab: Vocab, embedding) -> None:
         super().__init__()
 
         self.vocab      = vocab
@@ -21,15 +22,16 @@ class TransDecoder(torch_nn.Module):
         decoder_layer   = torch_nn.TransformerDecoderLayer(d_model=self.d_hid1, nhead=8)
         self.decoder    = torch_nn.TransformerDecoder(decoder_layer, num_layers=6)
 
-        self.ff_ans     = torch_nn.Sequential(
-            torch_nn.Linear(self.d_embd, self.d_hid1),
-            torch_nn.ReLU(),
+        self.embedding_ans  = embedding
+        self.ff_ans         = torch_nn.Sequential(
+            torch_nn.Linear(768, self.d_hid1),
+            torch_nn.Tanh(),
             torch_nn.Dropout(args.dropout)
         )
 
         self.ff_pred    = torch_nn.Sequential(
             torch_nn.Linear(self.d_hid1, self.d_vocab),
-            torch_nn.ReLU(),
+            torch_nn.Tanh(),
             torch_nn.Dropout(args.dropout)
         )
 
@@ -63,7 +65,7 @@ class TransDecoder(torch_nn.Module):
     def forward(self, Y, ans, ans_mask, is_inferring=False):
         # Y         : [b, seq_len_contx, d_hid * 2]
         # ans_mask  : [b, seq_len_ans]
-        # ans       : [b, seq_len_ans, d_embd]
+        # ans       : [b, seq_len_ans]
 
         batch   = ans_mask.shape[0]
 
@@ -116,9 +118,10 @@ class TransDecoder(torch_nn.Module):
             Y       = Y.transpose(0, 1)
             # [seq_len_contx, b, d_hid1]
 
-            # Use Teacher forcing with probability 100%
+            ans     = self.embedding_ans(ans, ans_mask)[0]
+            # [b, seq_len_ans, 768]
             ans     = self.ff_ans(ans).transpose(0, 1)
-            # [seq_len_ans, b, d_embd]
+            # [seq_len_ans, b, d_hid1]
 
             pred    = self.decoder(ans, Y)
             # [seq_len_ans, b, d_hid1]

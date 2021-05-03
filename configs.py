@@ -1,7 +1,6 @@
 """This file processes arguments and configs"""
 
-import argparse
-import logging
+import argparse, logging, os
 
 import torch
 
@@ -38,7 +37,12 @@ else:
 
 ## other args
 args.multi_gpus = torch.cuda.device_count() > 0
-args.bert_model         = "bert-base-uncased"
+
+if os.path.isdir("/home/ubuntu/BERT/bert-base-uncased"):
+    args.bert_model         = "/home/ubuntu/BERT/bert-base-uncased"
+else:
+    args.bert_model         = "bert-base-uncased"
+
 args.seq_len_ques       = 40
 args.seq_len_para       = 50
 args.seq_len_ans        = 40        # maximum answer length of dataset

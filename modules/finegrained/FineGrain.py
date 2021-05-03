@@ -57,8 +57,8 @@ class FineGrain(torch_nn.Module):
             ###################
             L_q = self.embedding(ques, ques_mask)[0]
             L_s = self.embedding(para, para_mask)[0]
-            # L_q: [b, seq_len_ques, d_embd]
-            # L_s: [b, seq_len_para, d_embd]
+            # L_q: [b, seq_len_ques, 768]
+            # L_s: [b, seq_len_para, 768]
 
             L_q = torch.tanh(self.linear_embd(L_q))
 
