@@ -4,7 +4,6 @@ from collections import defaultdict
 import glob, ast, gc, json
 
 from torch.utils.data import Dataset
-from torchtext.vocab import Vectors
 import torch
 from datasets import load_dataset
 from tqdm import tqdm
@@ -22,9 +21,8 @@ SEQ_LEN_CONTEXT = args.seq_len_para * args.n_paras
 class Vocab:
     def __init__(self, path_vocab=None) -> None:
         if path_vocab is None:
-            path_vocab  =PATH['vocab_PGD']
+            path_vocab  =PATH['vocab']
 
-        self.glove_embd = Vectors("glove.6B.200d.txt", cache=".vector_cache/")
 
         self.dict_stoi   = dict()
         self.dict_itos   = dict()
@@ -37,10 +35,6 @@ class Vocab:
         self.cls_id = 1
         self.sep_id = 2
         self.unk_id = 3
-        self.pad_vec= np.full((200,), 0)
-        self.cls_vec= np.full((200,), 1)
-        self.sep_vec= np.full((200,), 2)
-        self.unk_vec= np.full((200,), 3)
 
         # Construct vocab from token list file
         with open(path_vocab, 'r') as vocab_file:
@@ -53,13 +47,27 @@ class Vocab:
     def __len__(self):
         return len(self.dict_stoi)
 
-    def stoi(self, tok):
-        try:
-            id_ = self.dict_stoi[tok]
-        except KeyError:
-            id_ = self.dict_stoi[self.unk]
+    def stoi(self, toks):
+        def s_to_id(tok):
+            try:
+                id_ = self.dict_stoi[tok]
+            except KeyError:
+                id_ = self.dict_stoi[self.unk]
 
-        return id_
+            return id_
+
+        if isinstance(toks, torch.Tensor) or isinstance(toks, np.ndarray):
+            toks    = toks.tolist()
+
+
+        if isinstance(toks, str):
+            return s_to_id(toks)
+        if isinstance(toks[0], str):
+            return list(map(s_to_id, toks))
+        elif isinstance(toks[0], list):
+            return [list(map(s_to_id, tok)) for tok in toks]
+        else:
+            raise TypeError(f"'toks' must be 'list' or 'int' type. Got {type(toks)}")
 
     def itos(self, ids):
         def id_to_s(id_):
@@ -69,11 +77,11 @@ class Vocab:
                 tok = self.unk
 
             return tok
-        
+
         if isinstance(ids, torch.Tensor) or isinstance(ids, np.ndarray):
             ids    = ids.tolist()
 
-        
+
         if isinstance(ids, int):
             return id_to_s(ids)
         if isinstance(ids[0], int):
@@ -82,44 +90,6 @@ class Vocab:
             return [list(map(id_to_s, ids_)) for ids_ in ids]
         else:
             raise TypeError(f"'ids' must be 'list' or 'int' type. Got {type(ids)}")
-
-    def convert_tokens_to_ids(self, toks: list):
-        return list(map(self.stoi, toks))
-
-    def get_vecs_by_toks(self, toks):
-        return self.glove_embd.get_vecs_by_tokens(toks).numpy()
-
-    def get_vecs_by_tokids(self, toks):
-        if isinstance(toks, torch.Tensor) or isinstance(toks, np.ndarray):
-            toks    = toks.tolist()
-
-        def tokid_to_vec(tok_id):
-            if tok_id == self.pad_id:
-                return self.pad_vec
-            elif tok_id == self.cls_id:
-                return self.cls_vec
-            elif tok_id == self.sep_id:
-                return self.sep_vec
-            elif tok_id == self.unk_id:
-                return self.unk_vec
-            else:
-                return self.glove_embd.get_vecs_by_tokens(self.itos(tok_id)).numpy()
-
-        if isinstance(toks, int):
-            return tokid_to_vec(toks)
-        if isinstance(toks[0], int):
-            return np.array(list(map(tokid_to_vec, toks)))
-        elif isinstance(toks[0], list):
-            vecs    = [list(map(tokid_to_vec, toks_)) for toks_ in toks]
-
-            return np.array(vecs)
-        else:
-            raise TypeError(f"'toks' must be 'list' or 'int' type. Got {type(toks)}")
-            
-
-    def padding(self, l, max_len):
-        return l + [self.pad]*(max_len - len(l)), len(l)
-
 
 
 class CustomDataset(Dataset):
@@ -130,17 +100,16 @@ class CustomDataset(Dataset):
         # Read vocab
         self.vocab  = vocab
 
-        self.docId          = None
-        self.ques_plain     = None
+        # NOTE: These two fields are for debugging only
+        # self.docId          = None
+        # self.ques_plain     = None
         self.ques           = None
-        self.ques_len       = None
+        self.ques_mask      = None
         self.ans1           = None
-        self.ans1_len       = None
+        self.ans2           = None
         self.ans1_mask      = None
-        self.ans1_tok_idx   = None
-        self.ans2_tok_idx   = None
-        self.contx          = None
-        self.contx_len      = None
+        self.paras          = None
+        self.paras_mask     = None
 
         self.n_exchange     = args.n_paras // 2
 
@@ -154,52 +123,63 @@ class CustomDataset(Dataset):
 
 
         return {
-            'docId'         : self.docId[idx],
-            'ques_plain'    : self.ques_plain[idx],
+            # 'docId'         : self.docId[idx],
+            # 'ques_plain'    : self.ques_plain[idx],
             'ques'          : self.ques[idx],
-            'ques_len'      : self.ques_len[idx],
-            'contx'         : self.contx[idx],
-            'contx_len'     : self.contx_len[idx],
+            'ques_mask'     : self.ques_mask[idx],
             'ans1'          : self.ans1[idx],
-            'ans1_len'      : self.ans1_len[idx],
+            'ans2'          : self.ans2[idx],
             'ans1_mask'     : self.ans1_mask[idx],
-            'ans1_tok_idx'  : self.ans1_tok_idx[idx],
-            'ans2_tok_idx'  : self.ans2_tok_idx[idx]
+            'paras'         : self.paras[idx],
+            'paras_mask'    : self.paras_mask[idx]
         }
 
-    def f_process_file(self, entries, queue, arg):
-        vocab: Vocab    = arg[0]
-        for entry in entries.itertuples():
+    def process_sent(self, sent:str, max_len: int) -> tuple:
+        """Process sentence (question, a sentence in context or answer).
 
+        Args:
+            sent (str): sentence to be processed
+            max_len (int): predefined max len of sent to be padded
+
+        Returns:
+            tuple: tuple containing numpy arrays
+        """
+
+        sent_       = sent.lower().split(' ')
+
+        sent_       = self.vocab.stoi(sent_)
+
+        cls_tok_id  = self.vocab.cls_id
+        sep_tok_id  = self.vocab.sep_id
+        pad_tok_id  = self.vocab.pad_id
+
+        sent_       = [cls_tok_id] + sent_[:max_len-2] + [sep_tok_id]
+
+        sent_len_   = len(sent_)
+        sent_mask_  = np.array([1]*sent_len_ + [0]*(max_len - sent_len_), dtype=np.float)
+        sent_       = np.array(sent_ + [pad_tok_id]*(max_len - sent_len_), dtype=np.int)
+
+        return sent_, np.array(sent_len_), sent_mask_
+
+    def f_process_file(self, entries, queue, arg):
+        for entry in entries.itertuples():
             ###########################
             # Process question
             ###########################
-            ques, ques_len  = vocab.padding(entry.question.split(' '), args.seq_len_ques)
-            ques            = vocab.get_vecs_by_toks(ques)
+            ques, _, ques_mask  = self.process_sent(entry.question, args.seq_len_ques)
 
 
             ###########################
-            # Process answers including mask token id and embedding form
+            # Process answers
             ###########################
             answers         = ast.literal_eval(entry.answers)
-            ans1, ans2      = answers[0].split(' '), answers[1].split(' ')
 
-            if len(ans1) < len(ans2):
-                ans1, ans2 = ans2, ans1
+            # This trick ensures training process occurs in longer answer
+            if len(' '.split(answers[0])) < len(' '.split(answers[1])):
+                answers[0], answers[1] = answers[1], answers[0]
 
-            ans1            = [vocab.cls] + ans1 + [vocab.sep]
-            ans2            = [vocab.cls] + ans2 + [vocab.sep]
-
-            ans1_mask       = np.array([1]*len(ans1) +\
-                                       [0]*(args.seq_len_ans - len(ans1)), dtype=np.float)
-
-            ans1, ans1_len  = vocab.padding(ans1, args.seq_len_ans)
-            ans2, _         = vocab.padding(ans2, args.seq_len_ans)
-
-            ans1_tok_idx    = np.array([vocab.stoi(w.lower()) for w in ans1], dtype=np.long)
-            ans2_tok_idx    = np.array([vocab.stoi(w.lower()) for w in ans2], dtype=np.long)
-
-            ans1            = vocab.get_vecs_by_toks(ans1)
+            ans1, _, ans1_mask  = self.process_sent(answers[0], args.seq_len_ans)
+            ans2, _, _          = self.process_sent(answers[1], args.seq_len_ans)
 
 
             ###########################
@@ -211,43 +191,37 @@ class CustomDataset(Dataset):
             contx = En[self.n_exchange:args.n_paras] + Hn[:self.n_exchange]
 
             # Process context
-            contx = ' '.join(contx).split(' ')
+            paras, paras_mask = [], []
+            for sent in contx:
+                sent, _, sent_mask = self.process_sent(sent, args.seq_len_para)
+                paras.append(np.expand_dims(sent, axis=0))
+                paras_mask.append(np.expand_dims(sent_mask, axis=0))
 
-            # Pad context
-            contx, contx_len    = vocab.padding(contx, SEQ_LEN_CONTEXT)
-            # Embed context by GloVe
-            contx = vocab.get_vecs_by_toks(contx)
+            paras       = np.vstack(paras)
+            paras_mask  = np.vstack(paras_mask)
 
-            # context: [SEQ_LEN_CONTEXT = 1600, d_embd = 200]
 
             queue.put({
-                'docId'         : entry.doc_id,
-                'ques_plain'    : entry.question,
                 'ques'          : ques,
-                'ques_len'      : ques_len,
+                'ques_mask'     : ques_mask,
                 'ans1'          : ans1,
-                'ans1_len'      : ans1_len,
+                'ans2'          : ans2,
                 'ans1_mask'     : ans1_mask,
-                'ans1_tok_idx'  : ans1_tok_idx,
-                'ans2_tok_idx'  : ans2_tok_idx,
-                'contx'         : contx,
-                'contx_len'     : contx_len
+                'paras'         : paras,
+                'paras_mask'    : paras_mask
             })
-
     def read_shard(self, path_file):
         df  = pd.read_csv(path_file, index_col=None, header=0)
 
-        self.docId          = []
-        self.ques_plain     = []
+        # self.docId          = []
+        # self.ques_plain     = []
         self.ques           = []
-        self.ques_len       = []
+        self.ques_mask      = []
         self.ans1           = []
-        self.ans1_len       = []
+        self.ans2           = []
         self.ans1_mask      = []
-        self.ans1_tok_idx   = []
-        self.ans2_tok_idx   = []
-        self.contx          = []
-        self.contx_len      = []
+        self.paras          = []
+        self.paras_mask     = []
 
         gc.collect()
 
@@ -257,33 +231,28 @@ class CustomDataset(Dataset):
         ######################
         entries = ParallelHelper(self.f_process_file, df, lambda dat, l, h: dat.iloc[l:h],
                                  args.num_proc, self.vocab).launch()
-        # with Pool(args.num_proc) as pool:
-        #     entries = list(tqdm(pool.imap(f_process_file, zip(df.to_dict(orient='records'), repeat(self.vocab), repeat(self.n_exchange))),
-                                # desc="", total=len(df)))
 
         for entry in entries:
-            self.docId.append(entry['docId'])
-            self.ques_plain.append(entry['ques_plain'])
+            # self.docId.append(entry['docId'])
+            # self.ques_plain.append(entry['ques_plain'])
             self.ques.append(entry['ques'])
-            self.ques_len.append(entry['ques_len'])
+            self.ques_mask.append(entry['ques_mask'])
             self.ans1.append(entry['ans1'])
-            self.ans1_len.append(entry['ans1_len'])
+            self.ans2.append(entry['ans2'])
             self.ans1_mask.append(entry['ans1_mask'])
-            self.ans1_tok_idx.append(entry['ans1_tok_idx'])
-            self.ans2_tok_idx.append(entry['ans2_tok_idx'])
-            self.contx.append(entry['contx'])
-            self.contx_len.append(entry['contx_len'])
+            self.paras.append(entry['paras'])
+            self.paras_mask.append(entry['paras_mask'])
 
     def switch_answerability(self):
         if self.n_exchange == args.n_paras:
-            self.n_exchange == 0
+            self.n_exchange = 0
         else:
             self.n_exchange += args.n_paras // 2
 
 
 
-def build_vocab_PGD():
-    """ Build vocab for Pointer Generator Decoder. """
+def build_vocab():
+    """ Build vocab for Inferring answer module. """
     log = logging.getLogger("spacy")
     log.setLevel(logging.ERROR)
 
@@ -329,6 +298,11 @@ def build_vocab_PGD():
     words = words.union(answer_toks)
 
     # Write vocab to TXT file
-    with open(PATH['vocab_PGD'], 'w+') as vocab_file:
+    with open(PATH['vocab'], 'w+') as vocab_file:
+        for word in ["[pad]", "[cls]", "[sep]", "[unk]"]:
+            vocab_file.write(word + '\n')
+
+    # Write vocab to TXT file
+    with open(PATH['vocab'], 'w+') as vocab_file:
         for word in words:
             vocab_file.write(word + '\n')

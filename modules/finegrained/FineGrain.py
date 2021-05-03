@@ -10,40 +10,40 @@ from configs import args
 class FineGrain(torch_nn.Module):
     ''' Embed and generate question-aware context
     '''
-    def __init__(self, d_hid=256, d_hid2=512, d_emb=768):
+    def __init__(self):
         super().__init__()
 
-        self.d_hid  = d_hid
-        self.d_hid2 = d_hid2
-        self.d_emb  = d_emb
+        self.d_hid      = args.d_hid
+        self.d_emb_bert = 768
 
         ## Modules for embedding
-        self.embedding      = BertModel.from_pretrained(bert_model)
-        self.biGRU_emb      = torch_nn.GRU(d_emb, d_hid//2, num_layers=5,
+        self.embedding      = BertModel.from_pretrained(args.bert_model)
+        self.biGRU_emb      = torch_nn.GRU(self.d_emb_bert, self.d_hid//2, num_layers=5,
                                            batch_first=True, bidirectional=True)
-        self.linear_embd    = torch_nn.Linear(d_emb, d_emb)
+        self.linear_embd    = torch_nn.Sequential(
+            torch_nn.Linear(self.d_emb_bert, self.d_emb_bert),
+            torch_nn.ReLU(),
+            torch_nn.Dropout(args.dropout)
+        )
 
-        self.biGRU_CoAttn   = torch_nn.GRU(d_hid, d_hid//2, num_layers=5,
+        self.biGRU_CoAttn   = torch_nn.GRU(self.d_hid, self.d_hid//2, num_layers=5,
                                        batch_first=True, bidirectional=True)
-
-        self.linear_convert = torch_nn.Linear(d_hid, d_hid2)
 
     def forward(self, ques, paras, ques_mask, paras_mask):
         """ As implementing this module (Mar 11), it is aimed runing for each pair
         of question and each paragraph
         """
-        # ques       : [batch, seq_len_ques]
-        # ques_mask  : [batch, seq_len_ques]
-        # paras      : [batch, n_paras, seq_len_para]
-        # paras_mask : [batch, n_paras, seq_len_para]
+        # ques       : [b, seq_len_ques]
+        # ques_mask  : [b, seq_len_ques]
+        # paras      : [b, n_paras, seq_len_para]
+        # paras_mask : [b, n_paras, seq_len_para]
 
         #########################
         # Operate CoAttention question
         # with each paragraph
         #########################
-        seq_len_ques    = args.seq_len_ques
-        batch           = args.batch
-        n_paras         = args.n_paras
+        batch, seq_len_ques = ques.shape
+        n_paras             = paras.shape[1]
 
         question    = torch.zeros((batch, seq_len_ques, self.d_hid)).to(args.device)
         paragraphs  = None
@@ -57,16 +57,16 @@ class FineGrain(torch_nn.Module):
             ###################
             L_q = self.embedding(ques, ques_mask)[0]
             L_s = self.embedding(para, para_mask)[0]
-            # L_q: [batch, seq_len_ques, d_embd]
-            # L_s: [batch, seq_len_para, d_embd]
+            # L_q: [b, seq_len_ques, d_embd]
+            # L_s: [b, seq_len_para, d_embd]
 
             L_q = torch.tanh(self.linear_embd(L_q))
 
             E_q = self.biGRU_emb(L_q)[0]
             E_s = self.biGRU_emb(L_s)[0]
 
-            # E_q: [batch, seq_len_ques, d_hid]
-            # E_s: [batch, seq_len_para, d_hid]
+            # E_q: [b, seq_len_ques, d_hid]
+            # E_s: [b, seq_len_para, d_hid]
 
 
             ###################
@@ -76,11 +76,11 @@ class FineGrain(torch_nn.Module):
 
             # Affinity matrix
             A   = torch.bmm(E_s, transpose(E_q))
-            # A: [batch, seq_len_para, seq_len_ques]
+            # A: [b, seq_len_para, seq_len_ques]
 
             # S_s  = torch.matmul(torch_f.softmax(A, dim=1), E_q)
             S_q = torch.bmm(torch_f.softmax(transpose(A), dim=1), E_s)
-            # S_q: [batch, seq_len_ques, d_hid]
+            # S_q: [b, seq_len_ques, d_hid]
 
 
             X   = torch.bmm(torch_f.softmax(A, dim=1), S_q)
@@ -88,7 +88,7 @@ class FineGrain(torch_nn.Module):
             C_s = transpose(C_s)
 
             C_s = torch.unsqueeze(C_s, 1)
-            # C_s: [batch, 1, seq_len_ques, d_hid]
+            # C_s: [b, 1, seq_len_para, d_hid]
 
 
             question += S_q
@@ -97,22 +97,10 @@ class FineGrain(torch_nn.Module):
             else:
                 paragraphs = torch.cat((paragraphs, C_s), dim=1)
 
-        # question  : [batch, seq_len_ques, d_hid]
-        # paragraphs: [batch, n_paras, seq_len_ques, d_hid]
+        # question  : [b, seq_len_ques, d_hid]
+        # paragraphs: [b, n_paras, seq_len_para, d_hid]
 
-        #########################
-        # Convert to final 'paragraphs' tensor
-        #########################
-        question    = torch.sum(question, dim=1)
-        question    = torch.unsqueeze(question, 1)
-        # question  : [batch, 1, d_hid]
+        paragraphs  = paragraphs.view(batch, -1, self.d_hid)
+        # [b, seq_len_contx=n_paras*seq_len_para, d_hid]
 
-        paragraphs  = torch.sum(paragraphs, dim=2)
-        # paragraphs: [batch, n_paras, d_hid]
-
-        paragraphs  = torch.cat((paragraphs, question), dim=1)
-        # paragraphs: [batch, n_paras+1, d_hid]
-        paragraphs  = self.linear_convert(paragraphs)
-        # paragraphs: [batch, n_paras+1, d_hid2]
-
-        return paragraphs
+        return question, paragraphs

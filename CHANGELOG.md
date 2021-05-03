@@ -2,6 +2,14 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 3 2021, 10:10
+- Modify minor in *configs*
+- Reimplement *BeamSearch* with some simplifications
+- Use *FineGrain* with modifications instead of traditional *Embedding*
+- Add changes in training pipeline
+- Change fields in processing during training pipeline
+- Modify class *Vocab*: remove GloVe vectors, upgrade method *stoi*
+
 ## Apr 29 2021, 11:20
 - Apply new *Beam Search* from *huggingface*
 - Add *Vectors* to class *Vocab*

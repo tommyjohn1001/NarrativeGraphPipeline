@@ -1,4 +1,4 @@
-import os, json, sys
+import os, json
 
 from torch.utils.data import DataLoader
 import torch.nn.functional as torch_f
@@ -7,46 +7,43 @@ import torch
 from transformers import AdamW
 
 
-from modules.narrativepipeline.utils import CustomDataset, build_vocab_PGD, Vocab
+from modules.narrativepipeline.utils import CustomDataset, build_vocab, Vocab
 from modules.ans_infer.Transformer import TransDecoder
 from modules.utils import check_exist, get_scores
 from modules.Reasoning.IAL import IntrospectiveAlignmentLayer
-from modules.finegrained.Embedding import EmbeddingLayer
+from modules.finegrained.FineGrain import FineGrain
 from configs import args, logging, PATH
 
 class  NarrativePipeline(torch_nn.Module):
     def __init__(self, vocab):
         super().__init__()
 
-        self.embd_layer = EmbeddingLayer()
+        self.embd_layer = FineGrain()
         self.reasoning  = IntrospectiveAlignmentLayer()
         self.ans_infer  = TransDecoder(vocab)
 
-    def forward(self, ques, ques_len, contx, contx_len,
-                ans, ans_len, ans_mask, is_inferring=False):
-        # ques      : [b, seq_len_ques, d_embd]
-        # ques_len  : [b]
-        # contx     : [b, seq_len_contx, d_embd]
-        # contx_len : [b]
-        # ans       : [b, max_len_ans, d_embd]
-        # ans_len   : [b]
-        # ans_mask  : [b, max_len_ans]
+    def forward(self, ques, ques_mask, ans, ans_mask,
+                paras, paras_mask, is_inferring=False):
+        # ques       : [b, seq_len_ques]
+        # ques_mask  : [b, seq_len_ques]
+        # paras      : [b, n_paras, seq_len_para]
+        # paras_mask : [b, n_paras, seq_len_para]
+        # ans        : [b, seq_len_ans]
+        # ans_mask   : [b, seq_len_ans]
         # NOTE: all arguments used in this method must not modify the orginal
 
         ####################
-        # Embed question and context
-        # by LSTM
+        # Embed question and context with FineGrain
         ####################
-        H_q     = self.embd_layer(ques, ques_len)
-        H_c     = self.embd_layer(contx, contx_len)
-        # H_q   : [batch, seq_len_ques, d_hid]
-        # H_c   : [batch, seq_len_contx, d_hid]
+        ques, paras = self.embd_layer(ques, paras, ques_mask, paras_mask)
+        # ques  : [b, seq_len_ques, d_hid]
+        # paras : [b, seq_len_contx=n_paras*seq_len_para, d_hid]
 
 
         ####################
         # Do reasoning with IAL
         ####################
-        Y       = self.reasoning(H_q, H_c)
+        Y       = self.reasoning(ques, paras)
         # Y: [batch, seq_len_contx, 2*d_hid]
 
 
@@ -54,7 +51,7 @@ class  NarrativePipeline(torch_nn.Module):
         # Generate answer with PGD
         ####################
         pred    = self.ans_infer(Y, ans, ans_mask, is_inferring)
-        # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
+        # pred: [batch, seq_len_ans, d_vocab]
 
         return pred
 
@@ -67,11 +64,11 @@ class Trainer():
         # Build vocab for PointerGeneratorDecoder
         ################################
         logging.info("Preparation: Build vocab for PGD")
-        if not check_exist(PATH['vocab_PGD']):
-            build_vocab_PGD()
+        if not check_exist(PATH['vocab']):
+            build_vocab()
 
 
-        self.vocab  = Vocab(PATH['vocab_PGD'])
+        self.vocab  = Vocab(PATH['vocab'])
 
     def save_model(self, model):
         """
@@ -94,7 +91,7 @@ class Trainer():
 
         return model
 
-    def save_checkpoint(self, model, optimizer, scheduler, epoch):
+    def save_checkpoint(self, model, optimizer, scheduler, epoch, best_loss_test):
         """Save training checkpoint.
 
         Args:
@@ -105,10 +102,11 @@ class Trainer():
         """
         torch.save(
             {
-               'epoch'      : epoch,
-               'model_state': model.state_dict(),
-               'optim_state': optimizer.state_dict(),
-               'sched_state': scheduler.state_dict()
+               'epoch'          : epoch,
+               'model_state'    : model.state_dict(),
+               'optim_state'    : optimizer.state_dict(),
+               'sched_state'    : scheduler.state_dict(),
+               'best_loss_test' : best_loss_test
             }, PATH['saved_chkpoint'])
 
     def load_checkpoint(self):
@@ -135,44 +133,28 @@ class Trainer():
 
             for batch in iterator_train:
                 ques         = batch['ques'].to(args.device)
-                ques_len     = batch['ques_len']
-                contx        = batch['contx'].to(args.device)
-                contx_len    = batch['contx_len']
-                ans          = batch['ans1'].to(args.device)
-                ans_len      = batch['ans1_len']
-                ans_mask     = batch['ans1_mask'].to(args.device)
-                ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
-                ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
+                ques_mask    = batch['ques_mask']
+                ans1         = batch['ans1'].to(args.device)
+                ans1_mask    = batch['ans1_mask'].to(args.device)
+                paras        = batch['paras'].to(args.device)
+                paras_mask   = batch['paras_mask']
 
                 optimizer.zero_grad()
 
-                pred        = model(ques, ques_len, contx, contx_len,
-                                    ans, ans_len, ans_mask, is_inferring=False)
+                pred        = model(ques, ques_mask, ans1, ans1_mask,
+                                    paras, paras_mask, is_inferring=False)
                 # pred: [batch, seq_len_ans, d_vocab]
                 pred_flat   = pred.view(-1, args.d_vocab)
-                ans1_flat   = ans1_tok_idx.view(-1)
+                ans1_flat   = ans1.view(-1)
 
                 loss        = criterion(pred_flat, ans1_flat)
                 loss.backward()
 
-                # try:
-                #     loss        = criterion(pred_flat, ans1_flat)
-                #     loss.backward()
-                # except RuntimeError:
-                #     print(pred_flat)
-                #     print(ans1_flat)
-                #     exit()
                 torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=0.25)
                 optimizer.step()
                 scheduler.step()
 
                 loss_train += loss.detach().item()
-
-                ## Calculate metrics
-                pred        = torch_f.log_softmax(pred.double(), dim=2)
-                pred        = torch.argmax(pred, dim=2)
-                bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
-                exit
 
                 logging.info(f"  train: batch {nth_batch:4d} | loss: {loss:8.6f}")
                 nth_batch += 1
@@ -196,21 +178,19 @@ class Trainer():
                 n_samples   += len(dataset_test)
 
                 for batch in iterator_test:
-                    ques        = batch['ques'].to(args.device)
-                    ques_len    = batch['ques_len']
-                    contx       = batch['contx'].to(args.device)
-                    contx_len   = batch['contx_len']
-                    ans         = batch['ans1'].to(args.device)
-                    ans_len     = batch['ans1_len']
-                    ans_mask    = batch['ans1_mask'].to(args.device)
-                    ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
-                    ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
+                    ques         = batch['ques'].to(args.device)
+                    ques_mask    = batch['ques_mask']
+                    ans1         = batch['ans1'].to(args.device)
+                    ans2         = batch['ans2'].to(args.device)
+                    ans1_mask    = batch['ans1_mask'].to(args.device)
+                    paras        = batch['paras'].to(args.device)
+                    paras_mask   = batch['paras_mask']
 
-                    pred        = model(ques, ques_len, contx, contx_len,
-                                        ans, ans_len, ans_mask, is_inferring=True)
+                    pred        = model(ques, ques_mask, ans1, ans1_mask,
+                                        paras, paras_mask, is_inferring=True)
                     # pred: [batch, seq_len_ans, d_vocab]
                     pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1_tok_idx.view(-1)
+                    ans1_flat   = ans1.view(-1)
 
                     loss        = criterion(pred_flat, ans1_flat)
 
@@ -220,7 +200,7 @@ class Trainer():
                     ## Calculate metrics
                     pred        = torch_f.log_softmax(pred.double(), dim=2)
                     pred        = torch.argmax(pred, dim=2)
-                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
+                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1, ans2)
 
                     bleu_1  += bleu_1_
                     bleu_4  += bleu_4_
@@ -230,7 +210,7 @@ class Trainer():
                     logging.info(f"  test: batch {nth_batch:4d} | loss: {loss:8.6f}")
                     nth_batch += 1
 
-        with open("eval_result.json", 'a+') as result_file:
+        with open(PATH['eval_result'], 'a+') as result_file:
             json.dump({
                 'tag'   : "test",
                 'bleu_1': bleu_1/n_samples,
@@ -266,6 +246,7 @@ class Trainer():
                 torch_nn.init.xavier_uniform_(p)
 
         start_epoch = 0
+        best_loss_test  = 10e10
 
         # Check if previous checkpoint available
         if check_exist(PATH['saved_model']):
@@ -276,28 +257,30 @@ class Trainer():
             model.load_state_dict(states['model_state'])
             optimizer.load_state_dict(states['optim_state'])
             scheduler.load_state_dict(states['sched_state'])
-            start_epoch = states['epoch']
+            start_epoch     = states['epoch']
+            best_loss_test  = states['best_loss_test']
 
 
         ###############################
         # Start training
         ###############################
-        best_loss_test  = 10e10
         for nth_epoch in range(start_epoch, args.n_epochs):
             logging.info(f"= Epoch {nth_epoch}")
 
-            # loss_train  = self.train(model, dataset_train, criterion, optimizer, scheduler)
+            loss_train  = self.train(model, dataset_train, criterion, optimizer, scheduler)
             loss_test   = self.test(model, dataset_test, criterion)
 
-            
+
             logging.info("Switch Answerability.")
             dataset_train.switch_answerability()
 
-            
-            self.save_model(model)
+
+            if loss_test < best_loss_test:
+                best_loss_test = loss_test
+                self.save_model(model)
 
             logging.info(f"= Epoch {nth_epoch} finishes: loss_train {loss_train:.5f} | loss_test {loss_test:.5f}")
-            self.save_checkpoint(model, optimizer, scheduler, nth_epoch)
+            self.save_checkpoint(model, optimizer, scheduler, nth_epoch, best_loss_test)
 
 
     def get_batch_scores(self, pred, ans1_tok_idx, ans2_tok_idx) -> tuple:
@@ -310,8 +293,6 @@ class Trainer():
         # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
         # ans_tok_idx: [batch, seq_len_ans]
 
-        
-        # pred_: [batch, seq_len_ans]
 
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
         # Calculate for each batch
@@ -371,21 +352,19 @@ class Trainer():
 
                 iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch)
                 for batch in iterator_valid:
-                    ques        = batch['ques'].to(args.device)
-                    ques_len    = batch['ques_len']
-                    contx       = batch['contx'].to(args.device)
-                    contx_len   = batch['contx_len']
-                    ans         = batch['ans1'].to(args.device)
-                    ans_len     = batch['ans1_len']
-                    ans_mask    = batch['ans1_mask'].to(args.device)
-                    ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
-                    ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
+                    ques         = batch['ques'].to(args.device)
+                    ques_mask    = batch['ques_mask']
+                    ans1         = batch['ans1'].to(args.device)
+                    ans2         = batch['ans2'].to(args.device)
+                    ans1_mask    = batch['ans1_mask'].to(args.device)
+                    paras        = batch['paras'].to(args.device)
+                    paras_mask   = batch['paras_mask']
 
-                    pred        = model(ques, ques_len, contx, contx_len,
-                                        ans, ans_len, ans_mask, is_inferring=True)
+                    pred        = model(ques, ques_mask, ans1, ans1_mask,
+                                        paras, paras_mask, is_inferring=True)
                     # pred: [batch, seq_len_ans, d_vocab]
                     pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1_tok_idx.view(-1)
+                    ans1_flat   = ans1.view(-1)
 
                     loss        = criterion(pred_flat, ans1_flat)
 
@@ -393,7 +372,7 @@ class Trainer():
                     loss_test   += loss.detach().item()
 
                     # Get batch score
-                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
+                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1, ans2)
 
                     bleu_1  += bleu_1_
                     bleu_4  += bleu_4_
@@ -407,7 +386,7 @@ class Trainer():
         logging.info(f"End validattion: bleu_1 {bleu_1/n_samples:.5f} | bleu_4 {bleu_4/n_samples:.5f} \
                      | meteor {meteor/n_samples:.5f} | rouge_l {rouge_l/n_samples:.5f}")
 
-        with open("eval_result.json", 'a+') as result_file:
+        with open(PATH['eval_result'], 'a+') as result_file:
             json.dump({
                 'tag'   : "infer",
                 'bleu_1': bleu_1/n_samples,

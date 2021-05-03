@@ -91,7 +91,7 @@ class BeamSearch(GenerationMixin):
             )
 
             next_token_scores = torch_f.log_softmax(next_token_logits, dim=-1)  # (batch_size * num_beams, vocab_size)
-            
+
             next_token_scores = logits_processor(input_ids, next_token_scores)
             next_token_scores = next_token_scores + beam_scores[:, None].expand_as(next_token_scores)
 
