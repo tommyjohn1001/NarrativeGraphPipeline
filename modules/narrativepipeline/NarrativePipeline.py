@@ -21,7 +21,7 @@ class  NarrativePipeline(torch_nn.Module):
 
         self.embd_layer = SimpleBertEmbd()
         self.reasoning  = GraphReasoning()
-        self.ans_infer  = TransDecoder(vocab)
+        self.ans_infer  = TransDecoder(vocab, self.embd_layer.embedding)
 
     def forward(self, ques, ques_mask, ans, ans_mask,
                 paras, paras_len, paras_mask, edge_indx,
@@ -58,7 +58,7 @@ class  NarrativePipeline(torch_nn.Module):
         # node_feat : [b, 1+n_paras, 768]
 
         # Add 1 to each of tensor 'paras_len' because question is added to paras
-        paras_len   = paras_len + torch.ones((batch,))
+        paras_len   = paras_len + torch.ones((batch,)).to(args.device)
 
         Y       = self.reasoning(node_feat, edge_indx, paras_len.int(), edge_len)
         # Y: [b, d_hid=256]
@@ -71,7 +71,7 @@ class  NarrativePipeline(torch_nn.Module):
         Y       = Y.unsqueeze(1).repeat(1, d, 2)
         # [b, seq_len_para * n_paras, d_hid*2]
 
-        pred    = self.ans_infer(Y, ques_seq_embd, ans_seq_embd,
+        pred    = self.ans_infer(Y, ans_seq_embd,
                                  ans_mask, is_inferring)
         # pred: [batch, max_len_ans, d_vocab + seq_len_cntx]
 
@@ -154,22 +154,24 @@ class Trainer():
             iterator_train  = DataLoader(dataset_train, batch_size=args.batch, shuffle=True)
 
             for batch in iterator_train:
-                ques         = batch['ques'].to(args.device)
-                ques_len     = batch['ques_len']
-                contx        = batch['contx'].to(args.device)
-                contx_len    = batch['contx_len']
-                ans          = batch['ans1'].to(args.device)
-                ans_len      = batch['ans1_len']
-                ans_mask     = batch['ans1_mask'].to(args.device)
-                ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
+                ques        = batch['ques'].to(args.device)
+                ques_mask   = batch['ques_mask'].to(args.device)
+                paras       = batch['paras'].to(args.device)
+                paras_len   = batch['paras_len'].to(args.device)
+                paras_mask  = batch['paras_mask'].to(args.device)
+                ans1        = batch['ans1'].to(args.device)
+                ans1_mask   = batch['ans1_mask'].to(args.device)
+                edge_indx   = batch['edge_indx'].to(args.device)
+                edge_len    = batch['edge_len'].to(args.device)
 
                 optimizer.zero_grad()
 
-                pred        = model(ques, ques_len, contx, contx_len,
-                                    ans, ans_len, ans_mask, is_inferring=False)
+                pred        = model(ques, ques_mask, ans1, ans1_mask,
+                                    paras, paras_len, paras_mask, edge_indx,
+                                    edge_len, is_inferring=False)
                 # pred: [batch, seq_len_ans, d_vocab]
                 pred_flat   = pred.view(-1, args.d_vocab)
-                ans1_flat   = ans1_tok_idx.view(-1)
+                ans1_flat   = ans1.view(-1)
 
 
                 loss        = criterion(pred_flat, ans1_flat)
@@ -204,26 +206,29 @@ class Trainer():
 
                 for batch in iterator_test:
                     ques        = batch['ques'].to(args.device)
-                    ques_len    = batch['ques_len']
-                    contx       = batch['contx'].to(args.device)
-                    contx_len   = batch['contx_len']
-                    ans         = batch['ans1'].to(args.device)
-                    ans_len     = batch['ans1_len']
-                    ans_mask    = batch['ans1_mask'].to(args.device)
-                    ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
-                    ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
+                    ques_mask   = batch['ques_mask'].to(args.device)
+                    paras       = batch['paras'].to(args.device)
+                    paras_len   = batch['paras_len'].to(args.device)
+                    paras_mask  = batch['paras_mask'].to(args.device)
+                    ans1        = batch['ans1'].to(args.device)
+                    ans2        = batch['ans2'].to(args.device)
+                    ans1_mask   = batch['ans1_mask'].to(args.device)
+                    edge_indx   = batch['edge_indx'].to(args.device)
+                    edge_len    = batch['edge_len'].to(args.device)
 
-                    pred        = model(ques, ques_len, contx, contx_len,
-                                        ans, ans_len, ans_mask, is_inferring=True)
+                    pred        = model(ques, ques_mask, ans1, ans1_mask,
+                                        paras, paras_len, paras_mask, edge_indx,
+                                        edge_len, is_inferring=False)
                     # pred: [batch, seq_len_ans, d_vocab]
                     pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1_tok_idx.view(-1)
+                    ans1_flat   = ans1.view(-1)
 
                     loss        = criterion(pred_flat, ans1_flat)
 
                     loss_test += loss.detach().item()
 
-                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
+                    bleu_1_, bleu_4_, meteor_, rouge_l_ =\
+                        self.get_batch_scores(pred, ans1, ans2)
 
                     bleu_1  += bleu_1_
                     bleu_4  += bleu_4_
@@ -262,7 +267,7 @@ class Trainer():
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
         scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=0)
 
-        criterion   = torch_nn.CrossEntropyLoss(ignore_index=self.vocab.stoi(self.vocab.PAD))
+        criterion   = torch_nn.CrossEntropyLoss(ignore_index=self.vocab.pad_id)
 
         for p in model.parameters():
             if p.dim() > 1:
@@ -370,28 +375,29 @@ class Trainer():
                 iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch)
                 for batch in iterator_valid:
                     ques        = batch['ques'].to(args.device)
-                    ques_len    = batch['ques_len']
-                    contx       = batch['contx'].to(args.device)
-                    contx_len   = batch['contx_len']
-                    ans         = batch['ans1'].to(args.device)
-                    ans_len     = batch['ans1_len']
-                    ans_mask    = batch['ans1_mask'].to(args.device)
-                    ans1_tok_idx = batch['ans1_tok_idx'].to(args.device)
-                    ans2_tok_idx = batch['ans2_tok_idx'].to(args.device)
+                    ques_mask   = batch['ques_mask'].to(args.device)
+                    paras       = batch['paras'].to(args.device)
+                    paras_len   = batch['paras_len'].to(args.device)
+                    paras_mask  = batch['paras_mask'].to(args.device)
+                    ans1        = batch['ans1'].to(args.device)
+                    ans2        = batch['ans2'].to(args.device)
+                    ans1_mask   = batch['ans1_mask'].to(args.device)
+                    edge_indx   = batch['edge_indx'].to(args.device)
+                    edge_len    = batch['edge_len'].to(args.device)
 
-                    pred        = model(ques, ques_len, contx, contx_len,
-                                        ans, ans_len, ans_mask, is_inferring=True)
+                    pred        = model(ques, ques_mask, ans1, ans1_mask,
+                                        paras, paras_len, paras_mask, edge_indx,
+                                        edge_len, is_inferring=False)
                     # pred: [batch, seq_len_ans, d_vocab]
                     pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1_tok_idx.view(-1)
+                    ans1_flat   = ans1.view(-1)
 
                     loss        = criterion(pred_flat, ans1_flat)
 
-                    # Calculate loss
-                    loss_test   += loss.detach().item()
+                    loss_test += loss.detach().item()
 
-                    # Get batch score
-                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1_tok_idx, ans2_tok_idx)
+                    bleu_1_, bleu_4_, meteor_, rouge_l_ =\
+                        self.get_batch_scores(pred, ans1, ans2)
 
                     bleu_1  += bleu_1_
                     bleu_4  += bleu_4_

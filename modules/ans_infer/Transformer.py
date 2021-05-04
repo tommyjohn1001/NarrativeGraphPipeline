@@ -63,7 +63,7 @@ class TransDecoder(torch_nn.Module):
     def forward(self, Y, ans, ans_mask, is_inferring=False):
         # Y         : [b, seq_len_contx, d_hid * 2]
         # ans_mask  : [b, seq_len_ans]
-        # ans       : [b, seq_len_ans, d_embd]
+        # ans       : [b, seq_len_ans, 768]
 
         batch   = ans_mask.shape[0]
 

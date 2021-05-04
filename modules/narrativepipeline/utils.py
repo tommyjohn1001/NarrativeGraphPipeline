@@ -225,6 +225,8 @@ class CustomDataset(Dataset):
         return edge_index, edge_len
 
     def f_process_file(self, entries, queue, arg):
+        nlp_spacy   = arg[0]
+
         for entry in entries.itertuples():
             ###########################
             # Process question
@@ -278,7 +280,7 @@ class CustomDataset(Dataset):
             ###########################
             # Construct edges of graph
             ###########################
-            edge_indx, edge_len = self.construct_edge_indx(contx, entry.question)
+            edge_indx, edge_len = self.construct_edge_indx(contx, entry.question, nlp_spacy)
 
 
             queue.put({
@@ -316,7 +318,7 @@ class CustomDataset(Dataset):
         # answers' mask and index
         ######################
         entries = ParallelHelper(self.f_process_file, df, lambda dat, l, h: dat.iloc[l:h],
-                                 args.num_proc).launch()
+                                 args.num_proc, self.nlp_spacy).launch()
 
         for entry in entries:
             self.ques.append(entry['ques'])
