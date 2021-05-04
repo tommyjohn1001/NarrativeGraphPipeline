@@ -47,7 +47,7 @@ class  NarrativePipeline(torch_nn.Module):
         # ques_embd     : [b, 768]
         # ques_seq_embd : [b, seq_len_ques, 768]
         # paras_seq_embd: [b, n_paras, 768]
-        # ans_seq_embd  : [b, 768]
+        # ans_seq_embd  : [b, seq_len_ans, 768]
 
         ####################
         # Do reasoning with IAL

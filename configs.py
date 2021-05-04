@@ -1,7 +1,6 @@
 """This file processes arguments and configs"""
 
-import argparse
-import logging
+import argparse, logging, os
 
 import torch
 
@@ -14,8 +13,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--batch", type=int, default=5)
 parser.add_argument("--num_proc", type=int, default=4, help="number of processes")
 parser.add_argument("--n_epochs", type=int, default=10)
-parser.add_argument("--bert_model", type=str, default="bert-base-uncased",
-                    help="default pretrain BERT model")
 parser.add_argument("--n_shards", type=int, help="Number of chunks to split from large dataset",
                     default=8)
 parser.add_argument("--device", type=str, default="default", choices=["default", "cpu", "cuda"],
@@ -41,6 +38,12 @@ else:
 ## other args
 args.multi_gpus = torch.cuda.device_count() > 0
 
+path_bert   = "/home/ubuntu/BERT/bert-base-uncased"
+if os.path.isdir(path_bert):
+    args.bert_model         = path_bert
+else:
+    args.bert_model         = "bert-base-uncased"
+
 args.seq_len_ques       = 40
 args.seq_len_dataprocess= 50
 # TODO: Set the following arg after running DataReading module
@@ -62,7 +65,7 @@ args.n_edges            = 3120
 ###############################
 # Config logging
 ###############################
-logging.basicConfig(format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
+logging.basicConfig(filename='run.log', filemode='a+', format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
 logging.getLogger().setLevel(logging.INFO)
 
 ###############################
@@ -75,5 +78,5 @@ PATH    = {
     'vocab'             : "backup/vocab.txt",
     'saved_model'       : "backup/model.pt",
     'saved_chkpoint'    : "backup/chkpoint.pth.tar",
-    'eval_result'       : "backup/eval_result.json"
+    'eval_result'       : "backup/metrics.json"
 }

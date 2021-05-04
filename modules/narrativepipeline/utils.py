@@ -5,7 +5,6 @@ from itertools import combinations
 import glob, ast, gc, json
 
 from torch.utils.data import Dataset
-from torchtext.vocab import Vectors
 import torch
 from datasets import load_dataset
 from transformers import BertTokenizer
@@ -23,7 +22,6 @@ class Vocab:
         if path_vocab is None:
             path_vocab  =PATH['vocab']
 
-        self.glove_embd = Vectors("glove.6B.200d.txt", cache=".vector_cache/")
 
         self.dict_stoi   = dict()
         self.dict_itos   = dict()
@@ -36,10 +34,6 @@ class Vocab:
         self.cls_id = 1
         self.sep_id = 2
         self.unk_id = 3
-        self.pad_vec= np.full((200,), 0)
-        self.cls_vec= np.full((200,), 1)
-        self.sep_vec= np.full((200,), 2)
-        self.unk_vec= np.full((200,), 3)
 
         # Construct vocab from token list file
         with open(path_vocab, 'r') as vocab_file:
@@ -52,13 +46,27 @@ class Vocab:
     def __len__(self):
         return len(self.dict_stoi)
 
-    def stoi(self, tok):
-        try:
-            id_ = self.dict_stoi[tok]
-        except KeyError:
-            id_ = self.dict_stoi[self.unk]
+    def stoi(self, toks):
+        def s_to_id(tok):
+            try:
+                id_ = self.dict_stoi[tok]
+            except KeyError:
+                id_ = self.dict_stoi[self.unk]
 
-        return id_
+            return id_
+
+        if isinstance(toks, torch.Tensor) or isinstance(toks, np.ndarray):
+            toks    = toks.tolist()
+
+
+        if isinstance(toks, str):
+            return s_to_id(toks)
+        if isinstance(toks[0], str):
+            return list(map(s_to_id, toks))
+        elif isinstance(toks[0], list):
+            return [list(map(s_to_id, tok)) for tok in toks]
+        else:
+            raise TypeError(f"'toks' must be 'list' or 'int' type. Got {type(toks)}")
 
     def itos(self, ids):
         def id_to_s(id_):
@@ -68,11 +76,11 @@ class Vocab:
                 tok = self.unk
 
             return tok
-        
+
         if isinstance(ids, torch.Tensor) or isinstance(ids, np.ndarray):
             ids    = ids.tolist()
 
-        
+
         if isinstance(ids, int):
             return id_to_s(ids)
         if isinstance(ids[0], int):
@@ -81,42 +89,6 @@ class Vocab:
             return [list(map(id_to_s, ids_)) for ids_ in ids]
         else:
             raise TypeError(f"'ids' must be 'list' or 'int' type. Got {type(ids)}")
-
-    def convert_tokens_to_ids(self, toks: list):
-        return list(map(self.stoi, toks))
-
-    def get_vecs_by_toks(self, toks):
-        return self.glove_embd.get_vecs_by_tokens(toks).numpy()
-
-    def get_vecs_by_tokids(self, toks):
-        if isinstance(toks, torch.Tensor) or isinstance(toks, np.ndarray):
-            toks    = toks.tolist()
-
-        def tokid_to_vec(tok_id):
-            if tok_id == self.pad_id:
-                return self.pad_vec
-            elif tok_id == self.cls_id:
-                return self.cls_vec
-            elif tok_id == self.sep_id:
-                return self.sep_vec
-            elif tok_id == self.unk_id:
-                return self.unk_vec
-            else:
-                return self.glove_embd.get_vecs_by_tokens(self.itos(tok_id)).numpy()
-
-        if isinstance(toks, int):
-            return tokid_to_vec(toks)
-        if isinstance(toks[0], int):
-            return np.array(list(map(tokid_to_vec, toks)))
-        elif isinstance(toks[0], list):
-            vecs    = [list(map(tokid_to_vec, toks_)) for toks_ in toks]
-
-            return np.array(vecs)
-        else:
-            raise TypeError(f"'toks' must be 'list' or 'int' type. Got {type(toks)}")
-
-    def padding(self, l, max_len):
-        return l + [self.pad]*(max_len - len(l)), len(l)
 
 class CustomDataset(Dataset):
     def __init__(self, path_csv_dir, path_vocab):
@@ -171,7 +143,7 @@ class CustomDataset(Dataset):
     ###########################################
     # USER-DEFINED METHOD
     ###########################################
-    def process_sent(self, sent:str, max_len: int, nlp_bert: BertTokenizer, vocab: Vocab =None) -> tuple:
+    def process_sent(self, sent:str, max_len: int) -> tuple:
         """Process sentence (question, a sentence in context or answer).
 
         Args:
@@ -182,21 +154,15 @@ class CustomDataset(Dataset):
             tuple: tuple containing numpy arrays
         """
 
-        sent_   = sent.lower().split(' ')
-        if vocab:
-            sent_       = vocab.convert_tokens_to_ids(sent_)
+        sent_       = sent.lower().split(' ')
 
-            cls_tok_id  = vocab.stoi(vocab.CLS)
-            sep_tok_id  = vocab.stoi(vocab.SEP)
-            pad_tok_id  = vocab.stoi(vocab.PAD)
-        else:
-            sent_       = nlp_bert.convert_tokens_to_ids(sent_)
+        sent_       = self.vocab.stoi(sent_)
 
-            cls_tok_id  = nlp_bert.cls_token_id
-            sep_tok_id  = nlp_bert.sep_token_id
-            pad_tok_id  = nlp_bert.pad_token_id
+        cls_tok_id  = self.vocab.cls_id
+        sep_tok_id  = self.vocab.sep_id
+        pad_tok_id  = self.vocab.pad_id
 
-        sent_       = [cls_tok_id] + sent_ + [sep_tok_id]
+        sent_       = [cls_tok_id] + sent_[:max_len-2] + [sep_tok_id]
 
         sent_len_   = len(sent_)
         sent_mask_  = np.array([1]*sent_len_ + [0]*(max_len - sent_len_), dtype=np.float)
@@ -259,15 +225,11 @@ class CustomDataset(Dataset):
         return edge_index, edge_len
 
     def f_process_file(self, entries, queue, arg):
-        nlp_bert    = arg[0]
-        nlp_spacy   = arg[1]
-        vocab       = arg[2]
-
         for entry in entries.itertuples():
             ###########################
             # Process question
             ###########################
-            ques, _, ques_mask  = self.process_sent(entry.question, args.seq_len_ques, nlp_bert)
+            ques, _, ques_mask  = self.process_sent(entry.question, args.seq_len_ques)
 
 
             ###########################
@@ -280,8 +242,8 @@ class CustomDataset(Dataset):
             if len(ans1) < len(ans2):
                 answers[0], answers[1] = answers[1], answers[0]
 
-            ans1, _, ans1_mask  = self.process_sent(answers[0], args.seq_len_ans, nlp_bert, vocab)
-            ans2, _, _          = self.process_sent(answers[1], args.seq_len_ans, nlp_bert, vocab)
+            ans1, _, ans1_mask  = self.process_sent(answers[0], args.seq_len_ans)
+            ans2, _, _          = self.process_sent(answers[1], args.seq_len_ans)
 
 
             ###########################
@@ -295,7 +257,7 @@ class CustomDataset(Dataset):
             # Process context
             paras, paras_mask = [], []
             for sent in contx:
-                sent, _, sent_mask = self.process_sent(sent, args.seq_len_para, nlp_bert)
+                sent, _, sent_mask = self.process_sent(sent, args.seq_len_para)
                 paras.append(np.expand_dims(sent, axis=0))
                 paras_mask.append(np.expand_dims(sent_mask, axis=0))
 
@@ -316,7 +278,7 @@ class CustomDataset(Dataset):
             ###########################
             # Construct edges of graph
             ###########################
-            edge_indx, edge_len = self.construct_edge_indx(contx, entry.question, nlp_spacy)
+            edge_indx, edge_len = self.construct_edge_indx(contx, entry.question)
 
 
             queue.put({
@@ -354,10 +316,7 @@ class CustomDataset(Dataset):
         # answers' mask and index
         ######################
         entries = ParallelHelper(self.f_process_file, df, lambda dat, l, h: dat.iloc[l:h],
-                                 args.num_proc, self.nlp_bert, self.nlp_spacy, self.vocab).launch()
-        # with Pool(args.num_proc) as pool:
-        #     entries = list(tqdm(pool.imap(f_process_file, zip(df.to_dict(orient='records'), repeat(self.vocab), repeat(self.n_exchange))),
-                                # desc="", total=len(df)))
+                                 args.num_proc).launch()
 
         for entry in entries:
             self.ques.append(entry['ques'])

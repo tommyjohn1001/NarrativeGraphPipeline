@@ -11,6 +11,8 @@ class BertEmbedding(torch_nn.Module):
         super().__init__()
 
         self.embedding  = BertModel.from_pretrained(args.bert_model)
+        for param in self.embedding.parameters():
+            param.requires_grad = False
 
     def forward(self, X, X_mask):
         # X, X_mask: [b, seq_len]
