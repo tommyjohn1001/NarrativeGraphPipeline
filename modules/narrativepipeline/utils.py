@@ -98,14 +98,14 @@ class CustomDataset(Dataset):
         self.nlp_spacy  = spacy.load("en_core_web_sm")
         self.nlp_bert   = BertTokenizer.from_pretrained(args.bert_model)
 
-        # Read vocab
-        self.vocab  = Vocab(path_vocab)
 
         self.ques           = None
         self.ques_mask      = None
         self.ans1           = None  # in token ID form, not embedded form
         self.ans2           = None  # in token ID form, not embedded form
         self.ans1_mask      = None
+        self.ans1_plain     = None
+        self.ans2_plain     = None
         self.paras          = None
         self.paras_len      = None  # this is no. nodes (paras)
         self.paras_mask     = None
@@ -132,6 +132,8 @@ class CustomDataset(Dataset):
             'ans1'          : self.ans1[idx],
             'ans2'          : self.ans2[idx],
             'ans1_mask'     : self.ans1_mask[idx],
+            'ans1_plain'    : self.ans1_plain[idx],
+            'ans2_plain'    : self.ans2_plain[idx],
             'paras'         : self.paras[idx],
             'paras_len'     : self.paras_len[idx],
             'paras_mask'    : self.paras_mask[idx],
@@ -156,11 +158,11 @@ class CustomDataset(Dataset):
 
         sent_       = sent.lower().split(' ')
 
-        sent_       = self.vocab.stoi(sent_)
+        sent_       = self.nlp_bert.convert_tokens_to_ids(sent_)
 
-        cls_tok_id  = self.vocab.cls_id
-        sep_tok_id  = self.vocab.sep_id
-        pad_tok_id  = self.vocab.pad_id
+        cls_tok_id  = self.nlp_bert.cls_token_id
+        sep_tok_id  = self.nlp_bert.sep_token_id
+        pad_tok_id  = self.nlp_bert.pad_token_id
 
         sent_       = [cls_tok_id] + sent_[:max_len-2] + [sep_tok_id]
 
@@ -170,7 +172,7 @@ class CustomDataset(Dataset):
 
         return sent_, np.array(sent_len_), sent_mask_
 
-    def construct_edge_indx(self, paras: list, question: str, nlp_spacy) -> tuple:
+    def construct_edge_indx(self, paras: list, question: str) -> tuple:
         """Construct graph edges' index using raw question and paras
 
         Args:
@@ -191,7 +193,7 @@ class CustomDataset(Dataset):
         # Construct para vocab
         #####################
         for ith, para in enumerate(paras):
-            for tok in nlp_spacy(para):
+            for tok in self.nlp_spacy(para):
                 if not (tok.is_stop or tok.is_punct):
                     para_vocab[tok.text].add(ith)
 
@@ -225,8 +227,6 @@ class CustomDataset(Dataset):
         return edge_index, edge_len
 
     def f_process_file(self, entries, queue, arg):
-        nlp_spacy   = arg[0]
-
         for entry in entries.itertuples():
             ###########################
             # Process question
@@ -280,7 +280,7 @@ class CustomDataset(Dataset):
             ###########################
             # Construct edges of graph
             ###########################
-            edge_indx, edge_len = self.construct_edge_indx(contx, entry.question, nlp_spacy)
+            edge_indx, edge_len = self.construct_edge_indx(contx, entry.question)
 
 
             queue.put({
@@ -289,6 +289,8 @@ class CustomDataset(Dataset):
                 'ans1'          : ans1,
                 'ans2'          : ans2,
                 'ans1_mask'     : ans1_mask,
+                'ans1_plain'    : answers[0],
+                'ans2_plain'    : answers[1],
                 'paras'         : paras,
                 'paras_len'     : paras_len,
                 'paras_mask'    : paras_mask,
@@ -305,6 +307,8 @@ class CustomDataset(Dataset):
         self.ans1           = []
         self.ans2           = []
         self.ans1_mask      = []
+        self.ans1_plain     = []
+        self.ans2_plain     = []
         self.paras          = []
         self.paras_len      = []
         self.paras_mask     = []
@@ -318,7 +322,7 @@ class CustomDataset(Dataset):
         # answers' mask and index
         ######################
         entries = ParallelHelper(self.f_process_file, df, lambda dat, l, h: dat.iloc[l:h],
-                                 args.num_proc, self.nlp_spacy).launch()
+                                 args.num_proc).launch()
 
         for entry in entries:
             self.ques.append(entry['ques'])
@@ -329,6 +333,8 @@ class CustomDataset(Dataset):
             self.ans1.append(entry['ans1'])
             self.ans2.append(entry['ans2'])
             self.ans1_mask.append(entry['ans1_mask'])
+            self.ans1_plain.append(entry['ans1_plain'])
+            self.ans2_plain.append(entry['ans2_plain'])
             self.edge_indx.append(entry['edge_indx'])
             self.edge_len.append(entry['edge_len'])
 

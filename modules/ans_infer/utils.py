@@ -28,7 +28,7 @@ class BeamSearch():
     """
     def __init__(self,
         max_depth : int = 5,
-        max_breadth : int = 5,
+        max_breadth : int = 8,
         model = None,
         max_len : int = 12,
         init_tok: int = 0,
@@ -60,7 +60,6 @@ class BeamSearch():
         # Initiate
         queue.append((0, 0, (self.init_tok, )))
         while nth_depth < self.max_len:
-            print(nth_depth)
             max_depth   = min([self.max_len - nth_depth, self.max_depth])
 
             # Do a Beam Search

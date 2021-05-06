@@ -1,4 +1,5 @@
 import os, json
+from typing import List
 
 from torch.utils.data import DataLoader
 import torch.nn.functional as torch_f
@@ -8,7 +9,6 @@ from transformers import AdamW
 
 
 from modules.narrativepipeline.utils import CustomDataset, build_vocab, Vocab
-# from modules.ans_infer.PointerGeneratorDecoder import PointerGeneratorDecoder
 from modules.ans_infer.Transformer import TransDecoder
 from modules.utils import check_exist, get_scores
 from modules.Reasoning.GraphReasoning import GraphReasoning
@@ -227,25 +227,9 @@ class Trainer():
 
                     loss_test += loss.detach().item()
 
-                    bleu_1_, bleu_4_, meteor_, rouge_l_ =\
-                        self.get_batch_scores(pred, ans1, ans2)
-
-                    bleu_1  += bleu_1_
-                    bleu_4  += bleu_4_
-                    meteor  += meteor_
-                    rouge_l += rouge_l_
-
                     logging.info(f"  test: batch {nth_batch:4d} | loss: {loss:8.6f}")
                     nth_batch += 1
 
-        with open(PATH["eval_result"], 'a+') as result_file:
-            json.dump({
-                'tag'   : "infer",
-                'bleu_1': bleu_1/n_samples,
-                'bleu_4': bleu_4/n_samples,
-                'meteor': meteor/n_samples,
-                'rouge_l': rouge_l/n_samples,
-            }, result_file, indent=2, ensure_ascii=False)
 
         return loss_test / nth_batch
 
@@ -340,6 +324,14 @@ class Trainer():
         return bleu_1, bleu_4, meteor, rouge_l
 
 
+    def clean_sent(self, sent: List[int]):
+        sent_ = []
+        for tok in sent:
+            if tok not in [self.vocab.cls_id, self.vocab.sep_id, self.vocab.unk_id, self.vocab.sep_id]:
+                sent_.append(self.vocab.itos(tok))
+
+        return ' '.join(sent_)
+
     def trigger_infer(self):
         ###############################
         # Load data
@@ -351,26 +343,21 @@ class Trainer():
         # Defind model and associated stuffs
         ###############################
         model       = NarrativePipeline(self.vocab).to(args.device)
-        criterion   = torch_nn.CrossEntropyLoss()
-        model       = model.to(args.device)
 
         model       = self.load_model(model)
 
         ###############################
         # Start infering
         ###############################
-        nth_batch, n_samples            = 0, 0
-        loss_test                       = 0
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
+
+        pred_result = []
 
         model.eval()
-
         with torch.no_grad():
             for valid_file in dataset_valid.file_names:
                 logging.info(f"Valid with file: {valid_file}")
 
                 dataset_valid.read_shard(valid_file)
-                n_samples   += len(dataset_valid)
 
                 iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch)
                 for batch in iterator_valid:
@@ -380,45 +367,30 @@ class Trainer():
                     paras_len   = batch['paras_len'].to(args.device)
                     paras_mask  = batch['paras_mask'].to(args.device)
                     ans1        = batch['ans1'].to(args.device)
-                    ans2        = batch['ans2'].to(args.device)
                     ans1_mask   = batch['ans1_mask'].to(args.device)
                     edge_indx   = batch['edge_indx'].to(args.device)
                     edge_len    = batch['edge_len'].to(args.device)
+                    ans1_plain  = batch['ans1_plain']
+                    ans2_plain  = batch['ans2_plain']
 
                     pred        = model(ques, ques_mask, ans1, ans1_mask,
                                         paras, paras_len, paras_mask, edge_indx,
-                                        edge_len, is_inferring=False)
-                    # pred: [batch, seq_len_ans, d_vocab]
-                    pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1.view(-1)
+                                        edge_len, is_inferring=True)
 
-                    loss        = criterion(pred_flat, ans1_flat)
+                    for pred_, ans1_, ans2_ in zip(pred, ans1_plain, ans2_plain):
+                        pred_result.append({
+                            'pred': self.clean_sent(pred_),
+                            'ans1': ans1_,
+                            'ans2': ans2_,
+                        })
 
-                    loss_test += loss.detach().item()
+                    break
 
-                    bleu_1_, bleu_4_, meteor_, rouge_l_ =\
-                        self.get_batch_scores(pred, ans1, ans2)
-
-                    bleu_1  += bleu_1_
-                    bleu_4  += bleu_4_
-                    meteor  += meteor_
-                    rouge_l += rouge_l_
-
-                    logging.info(f"  validate: batch {nth_batch} | loss: {loss:8.6f}")
-                    nth_batch += 1
+                break
 
 
-        logging.info(f"End validattion: bleu_1 {bleu_1/n_samples:.5f} | bleu_4 {bleu_4/n_samples:.5f} \
-                     | meteor {meteor/n_samples:.5f} | rouge_l {rouge_l/n_samples:.5f}")
-
-        with open(PATH["eval_result"], 'a+') as result_file:
-            json.dump({
-                'tag'   : "infer",
-                'bleu_1': bleu_1/n_samples,
-                'bleu_4': bleu_4/n_samples,
-                'meteor': meteor/n_samples,
-                'rouge_l': rouge_l/n_samples,
-            }, result_file, indent=2, ensure_ascii=False)
+        with open(PATH['prediction'], 'w+') as result_file:
+            json.dump(pred_result, result_file, indent=2, ensure_ascii=False)
 
 if __name__ == '__main__':
     logging.info("* Start NarrativePipeline")
@@ -426,6 +398,6 @@ if __name__ == '__main__':
 
     narrative_pipeline  = Trainer()
 
-    narrative_pipeline.trigger_train()
+    # narrative_pipeline.trigger_train()
 
     narrative_pipeline.trigger_infer()

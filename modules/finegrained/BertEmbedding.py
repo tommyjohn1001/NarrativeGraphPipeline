@@ -14,11 +14,11 @@ class BertEmbedding(torch_nn.Module):
         for param in self.embedding.parameters():
             param.requires_grad = False
 
-    def forward(self, X, X_mask):
+    def forward(self, X, X_mask=None):
         # X, X_mask: [b, seq_len]
 
         tmp = self.embedding(X, X_mask)
-        X, X_len = tmp[1], tmp[0]  
+        X, X_len = tmp[1], tmp[0]
         # X: [b, 768]
         # X: [b, seq_len, 768]
 

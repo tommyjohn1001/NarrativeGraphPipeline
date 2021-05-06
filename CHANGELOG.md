@@ -2,6 +2,13 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 6 2021, 22:44
+- Reorganize *configs.py*
+- Inferring in Transformer is now totally independent flow
+- Temporarily remove calculating metrics, just generating predicted answers only
+- Add 2 more fields `ans1_plain` and `ans1_plain` as creating iterator. Those are for inferring only.
+- Replace user-generated vocab by BERT vocab for creating data for training/eval/test.
+
 ## May 2 2021, 21:18
 - Reimplement *BeamSearch* by simplifiyng many steps
 - Switching context now occurs forcibly after training an epoch
