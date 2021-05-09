@@ -6,8 +6,8 @@ mkdir -p backup
 # python -m modules.data_reading.data_reading --num_proc 4
 
 # echo "2. Start training"
-CUDA_LAUNCH_BLOCKING=1 python -m modules.narrativepipeline.NarrativePipeline\
-    --batch 5 \
+python -m modules.narrativepipeline.NarrativePipeline\
+    --batch 64 \
     --num_proc 8 \
     --n_epochs 60 \
     --lr 5e-4 \
