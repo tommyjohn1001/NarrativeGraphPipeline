@@ -7,13 +7,12 @@ from modules.ans_infer.utils import BeamSearch
 from configs import args
 
 class TransDecoder(torch_nn.Module):
-    def __init__(self, vocab: Vocab) -> None:
+    def __init__(self, vocab: Vocab, bert_model) -> None:
         super().__init__()
 
         self.vocab      = vocab
 
         self.d_hid1     = args.d_hid * 2
-        self.d_embd     = args.d_embd
         self.d_vocab    = args.d_vocab
         self.max_len_ans= args.max_len_ans
         self.seq_len_ans= args.seq_len_ans
@@ -21,8 +20,9 @@ class TransDecoder(torch_nn.Module):
         decoder_layer   = torch_nn.TransformerDecoderLayer(d_model=self.d_hid1, nhead=8)
         self.decoder    = torch_nn.TransformerDecoder(decoder_layer, num_layers=6)
 
+        self.embedding  = bert_model
         self.ff_ans     = torch_nn.Sequential(
-            torch_nn.Linear(self.d_embd, self.d_hid1),
+            torch_nn.Linear(768, self.d_hid1),
             torch_nn.ReLU(),
             torch_nn.Dropout(args.dropout)
         )
@@ -63,23 +63,24 @@ class TransDecoder(torch_nn.Module):
     def forward(self, Y, ans, ans_mask, is_inferring=False):
         # Y         : [b, seq_len_contx, d_hid * 2]
         # ans_mask  : [b, seq_len_ans]
-        # ans       : [b, seq_len_ans, d_embd]
+        # ans       : [b, seq_len_ans, 768]
 
-        batch   = ans_mask.shape[0]
+        batch   = Y.shape[0]
 
         if is_inferring:
             def infer(tok_ids, Y):
-                # Y     : [seq_len_contx, d_hid * 2]
+                # Y      : [seq_len_contx, d_hid * 2]
                 # tok_ids: list of token ids
                 Y      = Y.unsqueeze(0).transpose(0, 1)
                 # [seq_len_contx, b=1, d_hid*2]
 
-                toks_emb = torch.FloatTensor(self.vocab.get_vecs_by_tokids(tok_ids))\
-                            .unsqueeze(1)\
-                            .to(args.device)
-                # [seq=*, b=1, d_embd]
+                toks_emb = torch.LongTensor(tok_ids).unsqueeze(0).to(args.device)
+                toks_emb = self.embedding(toks_emb)[0]
+                if len(toks_emb.shape) == 2:
+                    toks_emb = toks_emb.unsqueeze(0)
+                # [b=1, seq=*, 768]
 
-                toks_emb = self.ff_ans(toks_emb)
+                toks_emb = self.ff_ans(toks_emb).transpose(0, 1)
                 # [seq=*, b=1, d_hid*2]
 
                 output  = self.decoder(toks_emb, Y)
@@ -93,20 +94,16 @@ class TransDecoder(torch_nn.Module):
 
                 return output
             pred        = []
-            beam_search = BeamSearch(model=infer, early_stop=True)
+            beam_search = BeamSearch(beam_size=args.beam_size, max_len=self.max_len_ans,
+                                     model=infer, no_repeat_ngram_size=args.n_gram_beam,
+                                     topk_strategy="nucleus_sample")
 
             for b in range(batch):
                 indices = beam_search.search(Y[b, :, :])
-                print(self.vocab.itos(indices))
-                pred_   = torch.zeros((self.seq_len_ans, self.d_vocab))
 
-                for i, indx in enumerate(indices):
-                    pred_[i, indx]  = 1
+                pred.append(indices)
 
-                pred.append(pred_)
-
-            pred    = torch.vstack(pred).to(args.device)
-            # [b, seq_len_ans, d_vocab]
+            return pred
 
         else:
             Y       = Y.transpose(0, 1)
@@ -125,18 +122,18 @@ class TransDecoder(torch_nn.Module):
             # [b, seq_len_ans, d_vocab]
 
 
-        ########################
-        # Multiply 'pred' with 2 masks
-        ########################
-        # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
-        ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab).to(args.device)
-        pred        = pred * ans_mask
-        # pred: [b, seq_len_ans, d_vocab]
+            ########################
+            # Multiply 'pred' with 2 masks
+            ########################
+            # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
+            ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab).to(args.device)
+            pred        = pred * ans_mask
+            # pred: [b, seq_len_ans, d_vocab]
 
-        # Multiply 'pred' with mask SEP
-        sep_mask    = self.get_mask_sep(pred).to(args.device)
-        pred        = pred * sep_mask
-        # pred: [b, seq_len_ans, d_vocab]
+            # Multiply 'pred' with mask SEP
+            sep_mask    = self.get_mask_sep(pred).to(args.device)
+            pred        = pred * sep_mask
+            # pred: [b, seq_len_ans, d_vocab]
 
 
-        return pred
+            return pred

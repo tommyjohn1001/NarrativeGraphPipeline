@@ -5,8 +5,8 @@ import torch.nn as torch_nn
 import torch
 from tqdm import tqdm
 from rouge import Rouge
-from nltk.translate.meteor_score import meteor_score
-from nltk.translate.bleu_score import sentence_bleu
+# from nltk.translate.meteor_score import meteor_score
+# from nltk.translate.bleu_score import sentence_bleu
 import numpy as np
 
 from configs import args

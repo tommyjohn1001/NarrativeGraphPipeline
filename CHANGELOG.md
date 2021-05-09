@@ -2,6 +2,21 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 9 2021, 23:39
+- Reimplement *BeamSearch*: Replace *max_depth* and *max_breadth* by *beam_size*
+- Add **Nucleus Sampling** technique to *BeamSearch*
+- Disable metric calculating fucntions. Intend to use built-in.
+- Modify some components in *Transformer*
+- Add field `ans1_loss` to DataLoader during training
+- Use *BertTokenizer* and remove some methods in class *Vocab*
+
+## May 6 2021, 22:44
+- Reorganize *configs.py*
+- Inferring in Transformer is now totally independent flow
+- Temporarily remove calculating metrics, just generating predicted answers only
+- Add 2 more fields `ans1_plain` and `ans1_plain` as creating iterator. Those are for inferring only.
+- Replace user-generated vocab by BERT vocab for creating data for training/eval/test.
+
 ## May 2 2021, 21:18
 - Reimplement *BeamSearch* by simplifiyng many steps
 - Switching context now occurs forcibly after training an epoch
