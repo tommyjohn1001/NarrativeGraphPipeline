@@ -1,4 +1,5 @@
 import os, json
+from typing import List
 
 from torch.utils.data import DataLoader
 import torch.nn.functional as torch_f
@@ -9,7 +10,7 @@ from transformers import AdamW
 
 from modules.narrativepipeline.utils import CustomDataset, build_vocab, Vocab
 from modules.ans_infer.Transformer import TransDecoder
-from modules.utils import check_exist, get_scores
+from modules.utils import check_exist
 from modules.Reasoning.IAL import IntrospectiveAlignmentLayer
 from modules.finegrained.FineGrain import FineGrain
 from configs import args, logging, PATH
@@ -136,6 +137,7 @@ class Trainer():
                 ques_mask    = batch['ques_mask'].to(args.device)
                 ans1         = batch['ans1'].to(args.device)
                 ans1_mask    = batch['ans1_mask'].to(args.device)
+                ans1_loss    = batch['ans1_loss'].to(args.device)
                 paras        = batch['paras'].to(args.device)
                 paras_mask   = batch['paras_mask'].to(args.device)
 
@@ -145,7 +147,7 @@ class Trainer():
                                     paras, paras_mask, is_inferring=False)
                 # pred: [batch, seq_len_ans, d_vocab]
                 pred_flat   = pred.view(-1, args.d_vocab)
-                ans1_flat   = ans1.view(-1)
+                ans1_flat   = ans1_loss.view(-1)
 
                 loss        = criterion(pred_flat, ans1_flat)
                 loss.backward()
@@ -165,7 +167,6 @@ class Trainer():
     def test(self, model, dataset_test, criterion):
         nth_batch, n_samples            = 0, 0
         loss_test                       = 0
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
 
         model.eval()
 
@@ -183,6 +184,7 @@ class Trainer():
                     ans1         = batch['ans1'].to(args.device)
                     ans2         = batch['ans2'].to(args.device)
                     ans1_mask    = batch['ans1_mask'].to(args.device)
+                    ans1_loss    = batch['ans1_loss'].to(args.device)
                     paras        = batch['paras'].to(args.device)
                     paras_mask   = batch['paras_mask'].to(args.device)
 
@@ -190,34 +192,15 @@ class Trainer():
                                         paras, paras_mask, is_inferring=True)
                     # pred: [batch, seq_len_ans, d_vocab]
                     pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1.view(-1)
+                    ans1_flat   = ans1_loss.view(-1)
 
                     loss        = criterion(pred_flat, ans1_flat)
 
                     loss_test += loss.detach().item()
 
 
-                    ## Calculate metrics
-                    pred        = torch_f.log_softmax(pred.double(), dim=2)
-                    pred        = torch.argmax(pred, dim=2)
-                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1, ans2)
-
-                    bleu_1  += bleu_1_
-                    bleu_4  += bleu_4_
-                    meteor  += meteor_
-                    rouge_l += rouge_l_
-
                     logging.info(f"  test: batch {nth_batch:4d} | loss: {loss:8.6f}")
                     nth_batch += 1
-
-        with open(PATH['eval_result'], 'a+') as result_file:
-            json.dump({
-                'tag'   : "test",
-                'bleu_1': bleu_1/n_samples,
-                'bleu_4': bleu_4/n_samples,
-                'meteor': meteor/n_samples,
-                'rouge_l': rouge_l/n_samples,
-            }, result_file, indent=2, ensure_ascii=False)
 
         return loss_test / nth_batch
 
@@ -282,41 +265,13 @@ class Trainer():
             logging.info(f"= Epoch {nth_epoch} finishes: loss_train {loss_train:.5f} | loss_test {loss_test:.5f}")
             self.save_checkpoint(model, optimizer, scheduler, nth_epoch, best_loss_test)
 
+    def clean_sent(self, sent: List[int]):
+        sent_ = []
+        for tok in sent:
+            if tok not in [self.vocab.cls_id, self.vocab.sep_id, self.vocab.unk_id, self.vocab.sep_id]:
+                sent_.append(self.vocab.itos(tok))
 
-    def get_batch_scores(self, pred, ans1_tok_idx, ans2_tok_idx) -> tuple:
-        """Calculate BLEU-1, BLEU4, METEOR and ROUGE_L for each entry in batch.
-
-        Args:
-            pred (tensor): predicted tensor
-            ans_tok_idx (tensor): target answer
-        """
-        # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
-        # ans_tok_idx: [batch, seq_len_ans]
-
-
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
-        # Calculate for each batch
-        for p, a1, a2 in zip(pred.tolist(), ans1_tok_idx.tolist(), ans2_tok_idx.tolist()):
-            p  = ' '.join([self.vocab.itos(i) for i in p  if i > 0])
-            a1 = ' '.join([self.vocab.itos(i) for i in a1 if i > 0])
-            a2 = ' '.join([self.vocab.itos(i) for i in a2 if i > 0])
-
-            if p == "":
-                p   = self.vocab.itos(0)
-
-            # print(f"pred: {p}")
-            # print(f"ans1: {a1}")
-            # print(f"ans2: {a2}")
-
-            bleu_1_, bleu_4_, meteor_, rouge_l_ = get_scores([a1, a2], p)
-
-            bleu_1  += bleu_1_
-            bleu_4  += bleu_4_
-            meteor  += meteor_
-            rouge_l += rouge_l_
-
-        return bleu_1, bleu_4, meteor, rouge_l
-
+        return ' '.join(sent_)
 
     def trigger_infer(self):
         ###############################
@@ -328,18 +283,13 @@ class Trainer():
         ###############################
         # Defind model and associated stuffs
         ###############################
-        model       = NarrativePipeline(self.vocab).to(args.device)
-        criterion   = torch_nn.CrossEntropyLoss()
-        model       = model.to(args.device)
-
+        model       = NarrativePipeline(self.vocab).to(args.device).to(args.device)
         model       = self.load_model(model)
 
         ###############################
         # Start infering
         ###############################
-        nth_batch, n_samples            = 0, 0
-        loss_test                       = 0
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
+        pred_result = []
 
         model.eval()
 
@@ -348,7 +298,6 @@ class Trainer():
                 logging.info(f"Valid with file: {valid_file}")
 
                 dataset_valid.read_shard(valid_file)
-                n_samples   += len(dataset_valid)
 
                 iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch)
                 for batch in iterator_valid:
@@ -362,38 +311,15 @@ class Trainer():
 
                     pred        = model(ques, ques_mask, ans1, ans1_mask,
                                         paras, paras_mask, is_inferring=True)
-                    # pred: [batch, seq_len_ans, d_vocab]
-                    pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1.view(-1)
+                    for pred_, ans1_, ans2_ in zip(pred, ans1, ans2):
+                        pred_result.append({
+                            'pred': self.clean_sent(pred_),
+                            'ans1': self.clean_sent(ans1_),
+                            'ans2': self.clean_sent(ans2_),
+                        })
 
-                    loss        = criterion(pred_flat, ans1_flat)
-
-                    # Calculate loss
-                    loss_test   += loss.detach().item()
-
-                    # Get batch score
-                    bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_batch_scores(pred, ans1, ans2)
-
-                    bleu_1  += bleu_1_
-                    bleu_4  += bleu_4_
-                    meteor  += meteor_
-                    rouge_l += rouge_l_
-
-                    logging.info(f"  validate: batch {nth_batch} | loss: {loss:8.6f}")
-                    nth_batch += 1
-
-
-        logging.info(f"End validattion: bleu_1 {bleu_1/n_samples:.5f} | bleu_4 {bleu_4/n_samples:.5f} \
-                     | meteor {meteor/n_samples:.5f} | rouge_l {rouge_l/n_samples:.5f}")
-
-        with open(PATH['eval_result'], 'a+') as result_file:
-            json.dump({
-                'tag'   : "infer",
-                'bleu_1': bleu_1/n_samples,
-                'bleu_4': bleu_4/n_samples,
-                'meteor': meteor/n_samples,
-                'rouge_l': rouge_l/n_samples,
-            }, result_file, indent=2, ensure_ascii=False)
+                    with open(PATH['prediction'], 'a+') as result_file:
+                        json.dump(pred_result, result_file, indent=2, ensure_ascii=False)
 
 if __name__ == '__main__':
     logging.info("* Start NarrativePipeline")

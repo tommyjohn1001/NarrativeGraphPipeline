@@ -19,6 +19,7 @@ parser.add_argument("--device", type=str, default="default", choices=["default",
                     help="Select device to run")
 parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--w_decay", type=float, default=0, help="Weight decay")
+parser.add_argument("--task", type=str, default="train", help="Train | Infer")
 
 # args = parser.parse_args()
 args, _ = parser.parse_known_args()
@@ -51,20 +52,13 @@ args.d_embd             = 200
 args.d_hid              = 256
 args.max_len_ans        = 12        # maximum inferring steps of decoder
 args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
-args.d_vocab            = 27154     # Vocab size
+args.d_vocab            = 27156     # Vocab size
 args.dropout            = 0.2
 args.n_layers           = 5
-args.beam_depth         = 5
-args.beam_breadth       = 8
-args.beam_size          = 10
-args.beam_ngram_repeat  = 5
 
+args.beam_size          = 8
+args.n_gram_beam        = 5
 
-###############################
-# Config logging
-###############################
-logging.basicConfig(filename='run.log', filemode='a+', format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
-logging.getLogger().setLevel(logging.INFO)
 
 ###############################
 # Config path of backup files
@@ -76,5 +70,13 @@ PATH    = {
     'vocab'             : "backup/vocab.txt",
     'saved_model'       : "backup/model.pt",
     'saved_chkpoint'    : "backup/chkpoint.pth.tar",
-    'eval_result'       : "backup/metrics.json"
+    'prediction'        : "backup/predictions.json",
+    'log'               : "run.log"
 }
+
+
+###############################
+# Config logging
+###############################
+logging.basicConfig(filename=PATH['log'], filemode='a+', format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
+logging.getLogger().setLevel(logging.INFO)

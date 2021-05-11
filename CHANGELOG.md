@@ -2,6 +2,13 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 11 2021, 16:32
+- Add new implementation of *BeamSearch*
+- Simplify `launcher.sh`
+- Remove *nltk*-related and metric calculating related. Inferring results now are dumped into JSON file for evaluating.
+- Modify *TransDecoder* module: result from inferring are not applied masks.
+- Add field `ans1_loss` to calculate loss for predicted answer
+
 ## May 3 2021, 10:10
 - Modify minor in *configs*
 - Reimplement *BeamSearch* with some simplifications

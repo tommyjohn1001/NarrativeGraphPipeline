@@ -5,6 +5,7 @@ import glob, ast, gc, json
 
 from torch.utils.data import Dataset
 import torch
+from transformers import BertTokenizer
 from datasets import load_dataset
 from tqdm import tqdm
 import pandas as pd
@@ -98,16 +99,19 @@ class CustomDataset(Dataset):
         self.file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
 
         # Read vocab
-        self.vocab  = vocab
+        self.vocab      = vocab
+
+        self.nlp_bert   = BertTokenizer.from_pretrained(args.bert_model)
 
         # NOTE: These two fields are for debugging only
         # self.docId          = None
         # self.ques_plain     = None
         self.ques           = None
         self.ques_mask      = None
-        self.ans1           = None
-        self.ans2           = None
+        self.ans1           = None # in token ID form, not embedded form
+        self.ans2           = None # in token ID form, not embedded form
         self.ans1_mask      = None
+        self.ans1_loss      = None
         self.paras          = None
         self.paras_mask     = None
 
@@ -130,6 +134,7 @@ class CustomDataset(Dataset):
             'ans1'          : self.ans1[idx],
             'ans2'          : self.ans2[idx],
             'ans1_mask'     : self.ans1_mask[idx],
+            'ans1_loss'     : self.ans1_loss[idx],
             'paras'         : self.paras[idx],
             'paras_mask'    : self.paras_mask[idx]
         }
@@ -147,11 +152,11 @@ class CustomDataset(Dataset):
 
         sent_       = sent.lower().split(' ')
 
-        sent_       = self.vocab.stoi(sent_)
+        sent_       = self.nlp_bert.convert_tokens_to_ids(sent_)
 
-        cls_tok_id  = self.vocab.cls_id
-        sep_tok_id  = self.vocab.sep_id
-        pad_tok_id  = self.vocab.pad_id
+        cls_tok_id  = self.nlp_bert.cls_token_id
+        sep_tok_id  = self.nlp_bert.sep_token_id
+        pad_tok_id  = self.nlp_bert.pad_token_id
 
         sent_       = [cls_tok_id] + sent_[:max_len-2] + [sep_tok_id]
 
@@ -160,6 +165,18 @@ class CustomDataset(Dataset):
         sent_       = np.array(sent_ + [pad_tok_id]*(max_len - sent_len_), dtype=np.int)
 
         return sent_, np.array(sent_len_), sent_mask_
+
+    def process_ans_loss(self, sent:str, max_len: int):
+        sent_       = sent.lower().split(' ')
+
+        sent_       = self.vocab.stoi(sent_)
+
+        pad_tok_id  = self.nlp_bert.pad_token_id
+
+        sent_len_   = len(sent_)
+        sent_       = np.array(sent_ + [pad_tok_id]*(max_len - sent_len_), dtype=np.int)
+
+        return sent_
 
     def f_process_file(self, entries, queue, arg):
         for entry in entries.itertuples():
@@ -180,6 +197,7 @@ class CustomDataset(Dataset):
 
             ans1, _, ans1_mask  = self.process_sent(answers[0], args.seq_len_ans)
             ans2, _, _          = self.process_sent(answers[1], args.seq_len_ans)
+            ans1_loss           = self.process_ans_loss(answers[0], args.seq_len_ans)
 
 
             ###########################
@@ -207,9 +225,11 @@ class CustomDataset(Dataset):
                 'ans1'          : ans1,
                 'ans2'          : ans2,
                 'ans1_mask'     : ans1_mask,
+                'ans1_loss'     : ans1_loss,
                 'paras'         : paras,
                 'paras_mask'    : paras_mask
             })
+
     def read_shard(self, path_file):
         df  = pd.read_csv(path_file, index_col=None, header=0)
 
@@ -220,6 +240,7 @@ class CustomDataset(Dataset):
         self.ans1           = []
         self.ans2           = []
         self.ans1_mask      = []
+        self.ans1_loss      = []
         self.paras          = []
         self.paras_mask     = []
 
@@ -230,7 +251,7 @@ class CustomDataset(Dataset):
         # answers' mask and index
         ######################
         entries = ParallelHelper(self.f_process_file, df, lambda dat, l, h: dat.iloc[l:h],
-                                 args.num_proc, self.vocab).launch()
+                                 args.num_proc).launch()
 
         for entry in entries:
             # self.docId.append(entry['docId'])
@@ -240,6 +261,7 @@ class CustomDataset(Dataset):
             self.ans1.append(entry['ans1'])
             self.ans2.append(entry['ans2'])
             self.ans1_mask.append(entry['ans1_mask'])
+            self.ans1_loss.append(entry['ans1_loss'])
             self.paras.append(entry['paras'])
             self.paras_mask.append(entry['paras_mask'])
 

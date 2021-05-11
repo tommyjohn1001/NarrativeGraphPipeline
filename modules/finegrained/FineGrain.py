@@ -18,6 +18,9 @@ class FineGrain(torch_nn.Module):
 
         ## Modules for embedding
         self.embedding      = BertModel.from_pretrained(args.bert_model)
+        # for param in self.embedding.parameters():
+        #     param.requires_grad = False
+
         self.biGRU_emb      = torch_nn.GRU(self.d_emb_bert, self.d_hid//2, num_layers=5,
                                            batch_first=True, bidirectional=True)
         self.linear_embd    = torch_nn.Sequential(

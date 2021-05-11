@@ -4,7 +4,7 @@ import torch.nn as torch_nn
 import torch
 
 from modules.utils import transpose
-
+from configs import args
 
 class AttentivePooling(torch_nn.Module):
     def __init__(self, dim):
@@ -23,27 +23,73 @@ class AttentivePooling(torch_nn.Module):
 
         return r.squeeze(-1)
 
+class CustomPriorityQueue():
+    def __init__(self, max_size, token, top="min") -> None:
+        self.queue      = []
+        self.queue_new  = []
+        self.max_size   = max_size
+        self.top        = top
+
+        # Initialize
+        for _ in range(max_size):
+            self.queue.append((0, (token, )))
+
+    def compare(self, a1, a2):
+        if self.top == "max":
+            return a1 < a2
+        return a1 > a2
+
+    def pop(self):
+        if len(self.queue) == 0:
+            self.queue.extend(self.queue_new[:self.max_size])
+            self.queue_new.clear()
+
+        return self.queue.pop(0)
+
+    def push(self, item):
+        if len(self.queue_new) == 0:
+            self.queue_new.append(item)
+        else:
+            for i in range(0, min(self.max_size, len(self.queue_new))):
+                if self.compare(self.queue_new[i][0], item[0]):
+                    self.queue_new.insert(i, item)
+                    break
+
+    def initialize(self, item):
+        self.queue.append(item)
+
+
+    def get_max_item(self):
+        return self.pop()
 
 class BeamSearch():
     """Implementation of Beam search for inferring process
     """
     def __init__(self,
-        max_depth : int = 5,
-        max_breadth : int = 5,
-        model = None,
+        beam_size : int = 10,
         max_len : int = 12,
-        init_tok: int = 0,
+        model = None,
+        init_tok: int = 1,
         stop_tok: int = 2,
         no_repeat_ngram_size: int = 5,
-        early_stop: bool = False):
-        self.max_depth      = max_depth
-        self.max_breadth    = max_breadth
+        early_stop: bool = False,
+        topk_strategy: str = "topk",
+        threshold = 0.65):
+
+        self.max_len        = max_len
         self.model          = model
         self.max_len        = max_len
         self.init_tok       = init_tok
         self.stop_tok       = stop_tok
         self.early_stop     = early_stop
         self.ngram_nonrepeat= no_repeat_ngram_size
+        self.topk_strategy  = topk_strategy
+        self.threshold      = threshold
+
+        if self.topk_strategy == "select_nucleus_sample_nobeam":
+            self.beam_size      = 1
+        else:
+            self.beam_size      = beam_size
 
 
     def search(self, Y: torch.Tensor):
@@ -54,28 +100,30 @@ class BeamSearch():
         """
         # Y: [seq_len_contx, d_hid * 2]
 
-        nth_depth   = 0
-        queue       = []
-        final_beams = [] # this list contains beams in leaves node of beam search tree
+        queue  = CustomPriorityQueue(self.beam_size, self.init_tok, "min")
 
-        # Initiate
-        queue.append((0, 0, (self.init_tok, )))
-        while nth_depth < self.max_len:
-            print(nth_depth)
-            max_depth   = min([self.max_len - nth_depth, self.max_depth])
+        for length in range(self.max_len):
+            # print(f"Length: {length}")
+            for beamth in range(self.beam_size):
+                # print(f"Beamth: {beamth}")
 
-            # Do a Beam Search
-            while len(queue) != 0:
-                depth, accum_prob, beam = queue.pop(0)
-                if depth == max_depth:
-                    final_beams.append((accum_prob, beam))
+                #################################
+                # Pop from queue and put into model
+                #################################
+                accum_prob, beam = queue.pop()
+
+                # Pass beam through model
+                # Only do this if last token of beam is not self.stop_tok
+                if beam[-1] == self.stop_tok:
                     continue
-
-                # Pass beam through model to
                 output  = self.model(beam, Y)[-1, :]
                 # [d_vocab]
 
 
+                #################################
+                # Apply constraints: no word occurs twice within n-gram,
+                # no n-gram occurs twice
+                #################################
                 disable_words = set()
 
                 # Within n_gram_nonpreeat words, no 2 words are the same
@@ -98,29 +146,31 @@ class BeamSearch():
                 for word in disable_words:
                     output[word] = 0
 
+
+                #################################
                 # Calculate log_softmax and topk
-                distribution        = torch.log_softmax(output, dim=0)
-                topk_dist, topk_tok = torch.topk(distribution, self.max_breadth, 0)
-                # topk_dist, topk_tok: [max_breadth]
+                #################################
+                if self.topk_strategy == "topk":
+                    distribution        = torch.log_softmax(output, dim=0)
+                    topk_dist, topk_tok = self.select_topk(distribution)
+                elif self.topk_strategy == "nucleus_sample":
+                    distribution        = torch.softmax(output, dim=0)
+                    topk_dist, topk_tok = self.select_nucleus_sample(distribution)
+                elif self.topk_strategy == "select_nucleus_sample_nobeam":
+                    distribution        = torch.softmax(output, dim=0)
+                    topk_dist, topk_tok = self.select_nucleus_sample_nobeam(distribution)
+                else:
+                    raise TypeError
+                # topk_dist, topk_tok: [beam_size]
 
                 # for each dis and token in top-k, create new beam
                 for dist_, tok_ in zip(topk_dist, topk_tok):
                     accum_dist_ = accum_prob + dist_.item()
                     new_beam    = beam  + (tok_.item(),)
 
-                    if self.early_stop and tok_.item() == self.stop_tok:
-                        queue.append((max_depth, accum_dist_, new_beam))
-                    else:
-                        queue.append((depth + 1, accum_dist_, new_beam))
+                    queue.push((accum_dist_, new_beam))
 
-            # Apply greedy method: Find best beam among found ones
-            max_pair = max(final_beams, key=lambda pair: pair[0])
-            final_beams.clear()
-            queue.append((0, 0, max_pair[1]))
-
-            nth_depth   += max_depth
-
-        return max_pair[1][1:]
+        return queue.get_max_item()[1]
 
     def find_next(self, sub_list: list, main_list: list) -> list:
         """Find all occurences of sub_list in main_list and return the number next to the sub_list in main_list.
@@ -148,3 +198,89 @@ class BeamSearch():
                 list_next.append(main_list[next_num])
 
         return set(list_next)
+
+    def select_topk(self, distribution):
+        topBeam_dist, topBeam_tok = torch.topk(distribution, self.beam_size, 0)
+        # [beam_size]
+
+        return topBeam_dist, topBeam_tok
+
+    def select_nucleus_sample(self, distribution):
+        d_vocab = distribution.shape[0]
+
+        ##########################
+        # Select topP using Nucleus sampling
+        ##########################
+        sorted_val, indices = torch.sort(distribution, dim=0, descending=True)
+
+        accum = 0
+        for i, val in enumerate(sorted_val):
+            if accum <= self.threshold <= accum + val:
+                break
+            accum += val
+
+        topP_tok    = indices[:i + 1]
+        topP_dist   = torch.index_select(distribution, dim=0, index=topP_tok) / accum
+
+
+        ##########################
+        # Randomly select topK
+        ##########################
+        K       = self.beam_size * 3
+        topK    = []
+
+        for _ in range(K):
+            r = torch.rand((1,)).item()
+            accum = 0
+            for tok, culmulative in zip(topP_tok, topP_dist):
+                if accum <= r <= accum + culmulative:
+                    break
+                accum += culmulative
+            topK.append(tok)
+
+
+        topK_dist   = [distribution[i]/accum if i in topK else 0 for i in range(d_vocab)]
+        topK_dist   = torch.log_softmax(torch.FloatTensor(topK_dist), dim=0)
+
+
+        ##########################
+        # Select beam_size element from topK
+        ##########################
+        topBeam_dist, topBeam_tok = torch.topk(topK_dist, self.beam_size, 0)
+
+
+        return topBeam_dist, topBeam_tok
+
+    def select_nucleus_sample_nobeam(self, distribution):
+
+        ##########################
+        # Select topP using Nucleus sampling
+        ##########################
+        sorted_val, indices = torch.sort(distribution, dim=0, descending=True)
+
+        accum = 0
+        for i, val in enumerate(sorted_val):
+            if accum <= self.threshold <= accum + val:
+                break
+            accum += val
+
+        topP_tok    = indices[:i + 1]
+        topP_dist   = torch.index_select(distribution, dim=0, index=topP_tok) / accum
+
+
+        ##########################
+        # Randomly select topK
+        ##########################
+
+
+
+        r = torch.rand((1,)).item()
+        accum = 0
+        for tok, culmulative in zip(topP_tok, topP_dist):
+            if accum <= r <= accum + culmulative:
+                break
+            accum += culmulative
+        topBeam_tok     = [tok]
+        topBeam_dist    = torch.log(torch.FloatTensor((culmulative, )))
+
+        return topBeam_dist, topBeam_tok
