@@ -48,7 +48,6 @@ paths_bert   = [
 for path in paths_bert:
     if os.path.isdir(path):
         args.bert_model = path
-    
 
 args.seq_len_ques       = 40
 args.seq_len_para       = 50
@@ -77,7 +76,8 @@ PATH    = {
     'saved_model'       : "backup/model.pt",
     'saved_chkpoint'    : "backup/chkpoint.pth.tar",
     'prediction'        : "backup/predictions.json",
-    'log'               : "run.log"
+    'log'               : "run.log",
+    'memory'            : "backup/memory.pt"
 }
 
 

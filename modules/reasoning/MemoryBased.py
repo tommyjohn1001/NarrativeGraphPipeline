@@ -7,10 +7,9 @@ from torch.nn.modules.transformer import Tensor, F, MultiheadAttention,\
 import torch.nn as torch_nn
 import torch
 
-from configs import args
+from modules.utils import check_exist
+from configs import args, PATH, logging
 
-
-memory     = [None]*(args.n_paras)
 
 class CustomTransEnc(torch_nn.Module):
     r"""CustomTransEnc is a stack of N enc layers
@@ -149,6 +148,73 @@ def _get_activation_fn(activation):
     raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
 
 
+class Memory(torch_nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.memory     = [None]*(args.n_paras)
+        self.attn_mask  = torch.rand((args.n_paras, 1, args.batch, 1),
+                                     device=args.device, requires_grad=True)
+
+        if check_exist(PATH['memory']):
+            logging.info("Tensors of MemoryModule exist. Load them.")
+
+            backup  = torch.load(PATH['memory'], map_location="cuda:0")
+            self.memory     = backup['memory']
+            self.attn_mask  = backup['attn_memory']
+
+
+        self.linear1    = torch_nn.Linear(args.d_hid, args.d_hid, bias=False)
+        self.linear2    = torch_nn.Linear(args.d_hid, args.d_hid, bias=False)
+        self.linear_gate= torch_nn.Linear(args.d_hid, args.d_hid, bias=True)
+
+
+    def forward(self, nth_para: int, ques_para: Tensor, output: Tensor):
+        # print(f"output   : {output.shape}")
+        # print(f"ques_para: {ques_para.shape}")
+        gate    = self.linear1(ques_para) + self.linear2(output)
+        gate    = torch.sigmoid(self.linear_gate(gate))
+
+        if  self.memory[nth_para] is None:
+            self.memory[nth_para] = ques_para.detach()
+        else:
+            tmp = gate * ques_para + (1 - gate) * self.memory[nth_para]
+            print()
+            self.memory[nth_para] = tmp.detach()
+
+
+    def update_mem(self, nth_para: int, ques_para: Tensor, output: Tensor):
+        """Update memory
+
+        Args:
+            nth_para (int): no. dim to be updated in list 'memory'
+            ques_para (Tensor): combination of quesiton and para
+            output (Tensor): output of TransEnc
+        """
+
+        self.forward(nth_para, ques_para, output)
+
+    def get_final_memory(self):
+        attn_mask   = torch.softmax(self.attn_mask, dim=0)
+        attn_mask   = attn_mask.repeat(1, args.seq_len_ques + args.seq_len_para, 1, args.d_hid)
+        # [n_paras, b, seq_len_ques + seq_len_para, d_hid]
+
+        memory_     = [t.unsqueeze(0) for t in self.memory]
+        memory_     = torch.vstack(memory_)
+        # [n_paras, b, seq_len_ques + seq_len_para, d_hid]
+
+        return (memory_ * attn_mask).sum(dim=1)
+
+    def get_mem_cell(self, nth_para):
+        return self.memory[nth_para]
+
+    def save_memory(self):
+        torch.save({
+            'memory'        : self.memory,
+            'attn_memory'   : self.attn_mask
+        }, PATH['memory'])
+
+
 class MemoryBasedReasoning(torch_nn.Module):
     def __init__(self):
         super().__init__()
@@ -163,13 +229,7 @@ class MemoryBasedReasoning(torch_nn.Module):
                                              num_layers=6)
 
 
-
-        self.linear1    = torch_nn.Linear(args.d_hid, args.d_hid, bias=False)
-        self.linear2    = torch_nn.Linear(args.d_hid, args.d_hid, bias=False)
-        self.linear_gate= torch_nn.Linear(args.d_hid, args.d_hid, bias=True)
-
-        self.attn_mask  = torch.rand((args.n_paras, 1, args.batch, 1),
-                                     device=args.device,requires_grad=True)
+        self.memory     = Memory()
 
     def forward(self, ques, paras):
         # ques  : [b, seq_len_ques, d_hid]
@@ -185,49 +245,22 @@ class MemoryBasedReasoning(torch_nn.Module):
         for nth_para in range(args.n_paras):
             ques_para   = ques_paras[nth_para]
             # [seq_len_ques + seq_len_para, b, d_hid]
-            if memory[nth_para] is None:
-                memory_cell = ques_para
+            if self.memory.get_mem_cell(nth_para) is None:
+                memory_cell = ques_para.squeeze(0)
             else:
-                memory_cell = memory[nth_para].squeeze(0)
+                memory_cell = self.memory.get_mem_cell(nth_para).squeeze(0)
             # [seq_len_ques + seq_len_para, b, d_hid]
 
             output      = self.trans_enc(memory_cell, ques_para)
             # [seq_len_ques + seq_len_para, b, d_hid]
 
 
-            self.update_mem(nth_para, ques_para, output)
+            self.memory.update_mem(nth_para, ques_para, output)
 
-        Y = self.get_final_memory()
+        Y = self.memory.get_final_memory()
         # [b, seq_len_ques + seq_len_para, d_hid]
 
         return Y
 
-    def update_mem(self, nth_para: int, ques_para: Tensor, output: Tensor):
-        """Update memory
-
-        Args:
-            nth_para (int): no. dim to be updated in list 'memory'
-            ques_para (Tensor): combination of quesiton and para
-            output (Tensor): output of TransEnc
-        """
-
-        gate    = self.linear1(ques_para) + self.linear2(output)
-        gate    = torch.sigmoid(self.linear_gate(gate))
-
-        if  memory[nth_para] is None:
-            memory[nth_para] = ques_para.detach()
-        else:
-            tmp = gate * ques_para.unsqueeze(0) + (1 - gate) * memory[nth_para]
-            memory[nth_para] = tmp.detach()
-
-    def get_final_memory(self):
-        attn_mask   = torch.softmax(self.attn_mask, dim=0)
-        attn_mask   = attn_mask.repeat(1, args.seq_len_ques + args.seq_len_para, 1, args.d_hid)
-        # [n_paras, b, seq_len_ques + seq_len_para, d_hid]
-
-        memory_     = [t.unsqueeze(0) for t in memory]
-        memory_     = torch.vstack(memory_)
-        # [n_paras, b, seq_len_ques + seq_len_para, d_hid]
-
-
-        return (memory_ * attn_mask).sum(dim=1)
+    def save_memory(self):
+        self.memory.save_memory()

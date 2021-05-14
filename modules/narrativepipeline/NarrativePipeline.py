@@ -96,7 +96,7 @@ class Trainer():
 
         return model
 
-    def save_checkpoint(self, model, optimizer, scheduler, epoch, best_loss_test):
+    def save_checkpoint(self, model: NarrativePipeline, optimizer, scheduler, epoch, best_loss_test):
         """Save training checkpoint.
 
         Args:
@@ -113,6 +113,9 @@ class Trainer():
                'sched_state'    : scheduler.state_dict(),
                'best_loss_test' : best_loss_test
             }, PATH['saved_chkpoint'])
+
+        ## Save tensors belonging to MemoryModule
+        model.reasoning.save_memory()
 
     def load_checkpoint(self):
         """Load state of model and optimizer for continuing training.
