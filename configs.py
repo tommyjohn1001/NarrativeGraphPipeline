@@ -19,7 +19,8 @@ parser.add_argument("--device", type=str, default="default", choices=["default",
                     help="Select device to run")
 parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--w_decay", type=float, default=0, help="Weight decay")
-parser.add_argument("--task", type=str, default="train", help="Train | Infer")
+parser.add_argument("--task", type=str, default="train", help="train | infer")
+parser.add_argument("--is_debug", type=bool, default=False, help="true | false")
 
 # args = parser.parse_args()
 args, _ = parser.parse_known_args()
@@ -83,5 +84,8 @@ PATH    = {
 ###############################
 # Config logging
 ###############################
-logging.basicConfig(filename=PATH['log'], filemode='a+', format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
+if args.is_debug:
+    logging.basicConfig(format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
+else:
+    logging.basicConfig(filename=PATH['log'], filemode='a+', format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
 logging.getLogger().setLevel(logging.INFO)

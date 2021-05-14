@@ -14,8 +14,6 @@ from modules.reasoning.MemoryBased import MemoryBasedReasoning
 from modules.finegrained.FineGrain import FineGrain
 from configs import args, logging, PATH
 
-# DEBUG: This line is for debugging purpose only.
-torch.autograd.set_detect_anomaly(True)
 
 class  NarrativePipeline(torch_nn.Module):
     def __init__(self, vocab):
@@ -38,8 +36,8 @@ class  NarrativePipeline(torch_nn.Module):
         ####################
         # Embed question and context with FineGrain
         ####################
-        ques, paras, ans = self.embd_layer(ques, paras, ans, ques_mask,
-                                      paras_mask, ans_mask)
+        ques, paras, ans = self.embd_layer(ques, paras, ans,
+                                           ques_mask, paras_mask, ans_mask)
         # ques  : [b, seq_len_ques, d_hid]
         # paras : [b, n_paras, seq_len_para, d_hid]
         # ans   : [b, seq_len_ans, d_hid]
@@ -74,6 +72,8 @@ class Trainer():
 
 
         self.vocab  = Vocab(PATH['vocab'])
+
+        self.first_time = True
 
     def save_model(self, model):
         """
@@ -156,7 +156,7 @@ class Trainer():
                 loss        = criterion(pred_flat, ans1_flat)
                 loss.backward()
 
-                torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=0.25)
+                torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1)
                 optimizer.step()
                 scheduler.step()
 
