@@ -2,7 +2,6 @@ import os, json
 from typing import List
 
 from torch.utils.data import DataLoader
-import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 from transformers import AdamW
@@ -11,16 +10,19 @@ from transformers import AdamW
 from modules.narrativepipeline.utils import CustomDataset, build_vocab, Vocab
 from modules.ans_infer.Transformer import TransDecoder
 from modules.utils import check_exist
-from modules.Reasoning.IAL import IntrospectiveAlignmentLayer
+from modules.reasoning.MemoryBased import MemoryBasedReasoning
 from modules.finegrained.FineGrain import FineGrain
 from configs import args, logging, PATH
+
+# DEBUG: This line is for debugging purpose only.
+torch.autograd.set_detect_anomaly(True)
 
 class  NarrativePipeline(torch_nn.Module):
     def __init__(self, vocab):
         super().__init__()
 
         self.embd_layer = FineGrain()
-        self.reasoning  = IntrospectiveAlignmentLayer()
+        self.reasoning  = MemoryBasedReasoning()
         self.ans_infer  = TransDecoder(vocab, self.embd_layer.embedding)
 
     def forward(self, ques, ques_mask, ans, ans_mask,
@@ -36,16 +38,18 @@ class  NarrativePipeline(torch_nn.Module):
         ####################
         # Embed question and context with FineGrain
         ####################
-        ques, paras = self.embd_layer(ques, paras, ques_mask, paras_mask)
+        ques, paras, ans = self.embd_layer(ques, paras, ans, ques_mask,
+                                      paras_mask, ans_mask)
         # ques  : [b, seq_len_ques, d_hid]
-        # paras : [b, seq_len_contx=n_paras*seq_len_para, d_hid]
+        # paras : [b, n_paras, seq_len_para, d_hid]
+        # ans   : [b, seq_len_ans, d_hid]
 
 
         ####################
         # Do reasoning with IAL
         ####################
         Y       = self.reasoning(ques, paras)
-        # Y: [batch, seq_len_contx, 2*d_hid]
+        # Y: [b, seq_len_ques_para=seq_len_ques+seq_len_para, d_hid]
 
 
         ####################

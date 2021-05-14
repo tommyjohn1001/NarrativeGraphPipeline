@@ -36,13 +36,18 @@ if args.device == "default":
 else:
     args.device = torch.device(args.device)
 
-## other args
 args.multi_gpus = torch.cuda.device_count() > 0
 
-if os.path.isdir("/home/ubuntu/BERT/bert-base-uncased"):
-    args.bert_model         = "/home/ubuntu/BERT/bert-base-uncased"
-else:
-    args.bert_model         = "bert-base-uncased"
+args.bert_model         = "bert-base-uncased"
+paths_bert   = [
+    "/root/bert-base-uncased/",
+    "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased/",
+    "/home/tommy/Projects"
+]
+for path in paths_bert:
+    if os.path.isdir(path):
+        args.bert_model = path
+    
 
 args.seq_len_ques       = 40
 args.seq_len_para       = 50

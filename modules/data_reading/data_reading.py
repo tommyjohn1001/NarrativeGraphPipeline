@@ -62,8 +62,6 @@ class DataReading():
         return context
 
     def export_para(self, toks):
-        # NOTE: The following code follows the original paper, and for analyzing purpose only.
-        # NOTE: remove the following and use the line of code commented after this piece of code
         para_   = []
         for i in range(0, len(toks), args.seq_len_para):
             tmp = re.sub(r'( |\t){2,}', ' ', ' '.join(toks[i:i+args.seq_len_para])).strip()
@@ -71,7 +69,6 @@ class DataReading():
 
         return np.array(para_)
 
-        # NOTE: This is the line must be uncommented
         # return re.sub(r'( {2,}|\t)', ' ', ' '.join(toks)).strip()
 
     def extract_html(self, context):

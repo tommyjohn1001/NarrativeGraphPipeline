@@ -153,7 +153,7 @@ class BeamSearch():
                 if self.topk_strategy == "topk":
                     distribution        = torch.log_softmax(output, dim=0)
                     topk_dist, topk_tok = self.select_topk(distribution)
-                elif self.topk_strategy == "nucleus_sample":
+                elif self.topk_strategy == "select_nucleus_sample":
                     distribution        = torch.softmax(output, dim=0)
                     topk_dist, topk_tok = self.select_nucleus_sample(distribution)
                 elif self.topk_strategy == "select_nucleus_sample_nobeam":

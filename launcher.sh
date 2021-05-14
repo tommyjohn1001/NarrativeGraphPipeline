@@ -7,8 +7,8 @@ mkdir -p backup
 
 # echo "2. Start training"
 python -m modules.narrativepipeline.NarrativePipeline\
-    --batch 64 \
+    --batch 2 \
     --num_proc 8 \
     --n_epochs 60 \
     --lr 5e-4 \
-    --w_decay 5e-1 \
+    --w_decay 0.95 \

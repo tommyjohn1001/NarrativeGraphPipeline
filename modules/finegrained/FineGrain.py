@@ -23,16 +23,14 @@ class FineGrain(torch_nn.Module):
 
         self.biGRU_emb      = torch_nn.GRU(self.d_emb_bert, self.d_hid//2, num_layers=5,
                                            batch_first=True, bidirectional=True)
-        self.linear_embd    = torch_nn.Sequential(
-            torch_nn.Linear(self.d_emb_bert, self.d_emb_bert),
-            torch_nn.ReLU(),
-            torch_nn.Dropout(args.dropout)
-        )
+        self.linear_embd    = torch_nn.Linear(self.d_emb_bert, self.d_emb_bert)
 
         self.biGRU_CoAttn   = torch_nn.GRU(self.d_hid, self.d_hid//2, num_layers=5,
                                        batch_first=True, bidirectional=True)
 
-    def forward(self, ques, paras, ques_mask, paras_mask):
+        self.linear_ans     = torch_nn.Linear(self.d_emb_bert, self.d_hid, bias=False)
+
+    def forward(self, ques, paras, ans, ques_mask, paras_mask, ans_mask):
         """ As implementing this module (Mar 11), it is aimed runing for each pair
         of question and each paragraph
         """
@@ -40,6 +38,8 @@ class FineGrain(torch_nn.Module):
         # ques_mask  : [b, seq_len_ques]
         # paras      : [b, n_paras, seq_len_para]
         # paras_mask : [b, n_paras, seq_len_para]
+        # ans        : [b, seq_len_ans]
+        # ans_mask   : [b, seq_len_ans]
 
         #########################
         # Operate CoAttention question
@@ -88,7 +88,6 @@ class FineGrain(torch_nn.Module):
 
             X   = torch.bmm(torch_f.softmax(A, dim=1), S_q)
             C_s = self.biGRU_CoAttn(X)[0]
-            C_s = transpose(C_s)
 
             C_s = torch.unsqueeze(C_s, 1)
             # C_s: [b, 1, seq_len_para, d_hid]
@@ -100,10 +99,11 @@ class FineGrain(torch_nn.Module):
             else:
                 paragraphs = torch.cat((paragraphs, C_s), dim=1)
 
+        ans = self.embedding(ans, ans_mask)[0]
+        ans = self.linear_ans(ans)
+
         # question  : [b, seq_len_ques, d_hid]
         # paragraphs: [b, n_paras, seq_len_para, d_hid]
+        # question  : [b, seq_len_ans, d_hid]
 
-        paragraphs  = paragraphs.view(batch, -1, self.d_hid)
-        # [b, seq_len_contx=n_paras*seq_len_para, d_hid]
-
-        return question, paragraphs
+        return question, paragraphs, ans
