@@ -2,7 +2,6 @@ import os, json
 from typing import List
 
 from torch.utils.data import DataLoader
-import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 from transformers import AdamW
@@ -12,47 +11,52 @@ from modules.narrativepipeline.utils import CustomDataset, build_vocab, Vocab
 from modules.ans_infer.Transformer import TransDecoder
 from modules.utils import check_exist
 from modules.reasoning.IAL import IntrospectiveAlignmentLayer
-from modules.finegrained.FineGrain import FineGrain
+from modules.finegrained.BertBasedEmbd import BertBasedEmbd
 from configs import args, logging, PATH
 
 class  NarrativePipeline(torch_nn.Module):
     def __init__(self, vocab):
         super().__init__()
 
-        self.embd_layer = FineGrain()
+        self.embd_layer = BertBasedEmbd()
         self.reasoning  = IntrospectiveAlignmentLayer()
         self.ans_infer  = TransDecoder(vocab, self.embd_layer.embedding)
 
     def forward(self, ques, ques_mask, ans, ans_mask,
                 paras, paras_mask, is_inferring=False):
-        # ques       : [b, seq_len_ques]
+        # ques       : [b, seq_len_ques, 200]
         # ques_mask  : [b, seq_len_ques]
-        # paras      : [b, n_paras, seq_len_para]
+        # paras      : [b, n_paras, seq_len_para, 200]
         # paras_mask : [b, n_paras, seq_len_para]
-        # ans        : [b, seq_len_ans]
+        # ans        : [b, seq_len_ans, 200]
         # ans_mask   : [b, seq_len_ans]
         # NOTE: all arguments used in this method must not modify the orginal
 
         ####################
         # Embed question and context with FineGrain
         ####################
-        ques, paras = self.embd_layer(ques, paras, ques_mask, paras_mask)
+        ques, paras, ans    = self.embd_layer(ques, paras, ans, ques_mask, paras_mask, ans_mask)
         # ques  : [b, seq_len_ques, d_hid]
         # paras : [b, seq_len_contx=n_paras*seq_len_para, d_hid]
+        # ans   : [b, seq_len_ans, d_hid]
+
+        print(ques.shape)
+        print(paras.shape)
+        print(ans.shape)
 
 
         ####################
         # Do reasoning with IAL
         ####################
         Y       = self.reasoning(ques, paras)
-        # Y: [batch, seq_len_contx, 2*d_hid]
+        # Y: [b, seq_len_contx, 2*d_hid]
 
 
         ####################
         # Generate answer with PGD
         ####################
-        pred    = self.ans_infer(Y, ans, ans_mask, is_inferring)
-        # pred: [batch, seq_len_ans, d_vocab]
+        pred    = self.ans_infer(Y, ans, is_inferring)
+        # pred: [b, seq_len_ans, d_vocab]
 
         return pred
 
@@ -135,37 +139,41 @@ class Trainer():
             for batch in iterator_train:
                 pred_result = []
 
-                ques         = batch['ques'].to(args.device)
-                ques_mask    = batch['ques_mask'].to(args.device)
-                ans1         = batch['ans1'].to(args.device)
-                ans2         = batch['ans2']
-                ans1_mask    = batch['ans1_mask'].to(args.device)
-                ans1_loss    = batch['ans1_loss'].to(args.device)
-                ans2_loss    = batch['ans2_loss'].to(args.device)
-                paras        = batch['paras'].to(args.device)
-                paras_mask   = batch['paras_mask'].to(args.device)
+                ques        = batch['ques'].to(args.device)
+                ques_mask   = batch['ques_mask'].to(args.device)
+                ans1        = batch['ans1'].to(args.device)
+                ans1_mask   = batch['ans1_mask'].to(args.device)
+                ans1_ids    = batch['ans1_ids']
+                ans2_ids    = batch['ans2_ids']
+                paras       = batch['paras'].to(args.device)
+                paras_mask  = batch['paras_mask'].to(args.device)
 
                 optimizer.zero_grad()
 
                 pred        = model(ques, ques_mask, ans1, ans1_mask,
                                     paras, paras_mask, is_inferring=False)
 
-                for pred_, ans1_, ans2_ in zip(pred, ans1, ans2):
+
+
+                for pred_, ans1_, ans2_ in zip(pred, ans1_ids, ans2_ids):
                     pred_result.append({
-                        'pred': self.clean_sent(pred_),
-                        'ans1': ' '.join(dataset_train.nlp_bert.convert_ids_to_tokens(ans1_)),
-                        'ans2': ' '.join(dataset_train.nlp_bert.convert_ids_to_tokens(ans2_)),
+                        'pred': ' '.join(self.vocab.itos(pred_)),
+                        'ans1': ' '.join(self.vocab.itos(ans1_)),
+                        'ans2': ' '.join(self.vocab.itos(ans2_))
                     })
 
                 with open("backup/pred_train.json", 'a+') as result_file:
                     json.dump(pred_result, result_file, indent=2, ensure_ascii=False)
 
-                # pred: [batch, seq_len_ans, d_vocab]
-                pred_flat   = pred.view(-1, args.d_vocab)
-                ans1_flat   = ans1_loss.view(-1)
-                ans2_flat   = ans2_loss.view(-1)
 
-                loss        = 0.7 * criterion(pred_flat, ans1_flat) + 0.3 * criterion(pred_flat, ans2_flat)
+
+                # pred: [b, seq_len_ans, d_vocab]
+                pred_flat   = pred.view(-1, args.d_vocab)
+                ans1_flat   = ans1_ids.view(-1)
+                ans2_flat   = ans2_ids.view(-1)
+
+                loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
+                              0.3 * criterion(pred_flat, ans2_flat)
                 loss.backward()
 
                 torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1)
@@ -195,23 +203,26 @@ class Trainer():
                 n_samples   += len(dataset_test)
 
                 for batch in iterator_test:
-                    ques         = batch['ques'].to(args.device)
-                    ques_mask    = batch['ques_mask'].to(args.device)
-                    ans1         = batch['ans1'].to(args.device)
-                    ans1_mask    = batch['ans1_mask'].to(args.device)
-                    ans1_loss    = batch['ans1_loss'].to(args.device)
-                    paras        = batch['paras'].to(args.device)
-                    paras_mask   = batch['paras_mask'].to(args.device)
+                    ques        = batch['ques'].to(args.device)
+                    ques_mask   = batch['ques_mask'].to(args.device)
+                    ans1        = batch['ans1'].to(args.device)
+                    ans1_mask   = batch['ans1_mask'].to(args.device)
+                    ans1_ids    = batch['ans1_ids'].to(args.device)
+                    ans2_ids    = batch['ans2_ids'].to(args.device)
+                    paras       = batch['paras'].to(args.device)
+                    paras_mask  = batch['paras_mask'].to(args.device)
 
                     pred        = model(ques, ques_mask, ans1, ans1_mask,
                                         paras, paras_mask, is_inferring=False)
                     # pred: [batch, seq_len_ans, d_vocab]
                     pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1_loss.view(-1)
+                    ans1_flat   = ans1_ids.view(-1)
+                    ans2_flat   = ans2_ids.view(-1)
 
-                    loss        = criterion(pred_flat, ans1_flat)
+                    loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
+                                  0.3 * criterion(pred_flat, ans2_flat)
 
-                    loss_test += loss.detach().item()
+                    loss_test   += loss.detach().item()
 
 
                     logging.info(f"  test: batch {nth_batch:4d} | loss: {loss:8.6f}")
@@ -237,7 +248,7 @@ class Trainer():
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay, eps=1e-6)
         scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=0)
 
-        criterion   = torch_nn.CrossEntropyLoss(ignore_index=self.vocab.stoi(self.vocab.pad))
+        criterion   = torch_nn.CrossEntropyLoss(ignore_index=self.vocab.pad_id)
 
         for p in model.parameters():
             if p.dim() > 1:
@@ -316,21 +327,22 @@ class Trainer():
 
                 iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch)
                 for batch in iterator_valid:
-                    ques         = batch['ques'].to(args.device)
-                    ques_mask    = batch['ques_mask'].to(args.device)
-                    ans1         = batch['ans1'].to(args.device)
-                    ans2         = batch['ans2'].to(args.device)
-                    ans1_mask    = batch['ans1_mask'].to(args.device)
-                    paras        = batch['paras'].to(args.device)
-                    paras_mask   = batch['paras_mask'].to(args.device)
+                    ques        = batch['ques'].to(args.device)
+                    ques_mask   = batch['ques_mask'].to(args.device)
+                    ans1        = batch['ans1'].to(args.device)
+                    ans1_mask   = batch['ans1_mask'].to(args.device)
+                    ans1_ids    = batch['ans1_ids']
+                    ans2_ids    = batch['ans2_ids']
+                    paras       = batch['paras'].to(args.device)
+                    paras_mask  = batch['paras_mask'].to(args.device)
 
                     pred        = model(ques, ques_mask, ans1, ans1_mask,
                                         paras, paras_mask, is_inferring=True)
-                    for pred_, ans1_, ans2_ in zip(pred, ans1, ans2):
+                    for pred_, ans1_, ans2_ in zip(pred, ans1_ids, ans2_ids):
                         pred_result.append({
-                            'pred': self.clean_sent(pred_),
-                            'ans1': ' '.join(dataset_valid.nlp_bert.convert_ids_to_tokens(ans1_)),
-                            'ans2': ' '.join(dataset_valid.nlp_bert.convert_ids_to_tokens(ans2_)),
+                            'pred': ' '.join(self.vocab.itos(pred_)),
+                            'ans1': ' '.join(self.vocab.itos(ans1_)),
+                            'ans2': ' '.join(self.vocab.itos(ans2_))
                         })
 
                     with open(PATH['prediction'], 'a+') as result_file:
@@ -342,6 +354,6 @@ if __name__ == '__main__':
 
     narrative_pipeline  = Trainer()
 
-    # narrative_pipeline.trigger_train()
+    narrative_pipeline.trigger_train()
 
     narrative_pipeline.trigger_infer()

@@ -30,49 +30,51 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
             for j in range(self.seq_len_contx):
                 if abs(i - j) <= Block:
                     self.mask[0,i,j] = 1
-        self.mask           = self.mask.repeat((self.batch, 1, 1)).to(args.device)
+        self.mask           = self.mask.repeat((self.b, 1, 1)).to(args.device)
 
     def forward(self, H_q, H_c):
-        # H_q   : [batch, seq_len_ques, d_hid]
-        # H_c   : [batch, seq_len_contex, d_hid]
+        # H_q   : [b, seq_len_ques, d_hid]
+        # H_c   : [b, seq_len_contex, d_hid]
 
 
         # Introspective Alignment
         H_q = self.linearIAL(H_q)
         H_c = self.linearIAL(H_c)
-        # H_q: [batch, seq_len_ques, d_hid]
-        # H_c: [batch, x, d_hid]
+        # H_q: [b, seq_len_ques, d_hid]
+        # H_c: [b, x, d_hid]
 
         # Pad dim 1 of H_c
         pad_zeros = torch.zeros((H_c.shape[0], self.seq_len_contx - H_c.shape[1], self.d_hid)).to(args.device)
         H_c = torch.cat((H_c, pad_zeros), dim=1)
 
-        # H_c: [batch, seq_len_contx, d_hid]
+        # H_c: [b, seq_len_contx, d_hid]
 
         E   = torch.bmm(H_c, transpose(H_q))
-        # E: [batch, seq_len_contx, seq_len_ques]
+        # E: [b, seq_len_contx, seq_len_ques]
         A   = torch.bmm(torch_f.softmax(E, dim=1), H_q)
-        # A: [batch, seq_len_contx, d_hid]
+        # A: [b, seq_len_contx, d_hid]
 
         # reasoning over alignments
         tmp = torch.cat((A, H_c, A - H_c, A * H_c), dim=-1)
-        # tmp: [batch, seq_len_contx, 4*d_hid]
+        # tmp: [b, seq_len_contx, 4*d_hid]
         G   = self.linearReason(tmp)
-        # G: [batch, seq_len_contx, d_hid]
+        # G: [b, seq_len_contx, d_hid]
 
 
         G   = torch.bmm(G, transpose(G))
 
-        G   = G * self.mask[:G.shape[0]]
+        print(f"G: {G.shape}")
+        print(f"mask: {self.mask[:G.shape[0], :, :].shape}")
+        G   = G * self.mask[:G.shape[0], :, :]
 
 
         # Local BLock-based Self-Attention
         B = torch.bmm(torch_f.softmax(G, dim=1), tmp)
-        # B: [batch, seq_len_contx, 4*d_hid]
+        # B: [b, seq_len_contx, 4*d_hid]
 
         Y = torch.cat((B, tmp), dim=-1)
-        # Y: [batch, seq_len_contx, 8*d_hid]
+        # Y: [b, seq_len_contx, 8*d_hid]
         Y = self.biLSTM_attn(Y)[0]
-        # Y: [batch, seq_len_contx, 2*d_hid]
+        # Y: [b, seq_len_contx, 2*d_hid]
 
         return Y

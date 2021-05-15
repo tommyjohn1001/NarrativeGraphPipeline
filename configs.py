@@ -47,10 +47,10 @@ paths_bert   = [
 for path in paths_bert:
     if os.path.isdir(path):
         args.bert_model = path
-args.seq_len_ques       = 40
-args.seq_len_para       = 50
-args.seq_len_ans        = 40        # maximum answer length of dataset
-args.n_paras            = 40
+args.seq_len_ques       = 40 + 2    # The reason why seq pluses 2 is for CLS
+args.seq_len_para       = 500 + 2   # and SEP token
+args.seq_len_ans        = 40 + 2    # maximum answer length of dataset
+args.n_paras            = 200
 args.d_embd             = 200
 args.d_hid              = 256
 args.max_len_ans        = 12        # maximum inferring steps of decoder

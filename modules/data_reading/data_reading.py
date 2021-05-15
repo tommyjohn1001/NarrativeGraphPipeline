@@ -114,7 +114,7 @@ class DataReading():
         sentences   = self.clean_context_movie(context).split('\n')
 
         paras       = np.array([])
-        n_tok       = 0 
+        n_tok       = 0
         para        = []
         for sent in sentences:
             ## Tokenize, remove stopword

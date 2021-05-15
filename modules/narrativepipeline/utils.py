@@ -4,6 +4,7 @@ from collections import defaultdict
 import glob, ast, gc, json
 
 from torch.utils.data import Dataset
+from torchtext.vocab import Vectors
 import torch
 from transformers import BertTokenizer
 from datasets import load_dataset
@@ -24,6 +25,7 @@ class Vocab:
         if path_vocab is None:
             path_vocab  =PATH['vocab']
 
+        self.glove_embd = Vectors("glove.6B.200d.txt", cache=".vector_cache/")
 
         self.dict_stoi   = dict()
         self.dict_itos   = dict()
@@ -36,6 +38,10 @@ class Vocab:
         self.cls_id = 1
         self.sep_id = 2
         self.unk_id = 3
+        self.pad_vec= np.full((200,), 0)
+        self.cls_vec= np.full((200,), 1)
+        self.sep_vec= np.full((200,), 2)
+        self.unk_vec= np.full((200,), 3)
 
         # Construct vocab from token list file
         with open(path_vocab, 'r') as vocab_file:
@@ -57,18 +63,7 @@ class Vocab:
 
             return id_
 
-        if isinstance(toks, torch.Tensor) or isinstance(toks, np.ndarray):
-            toks    = toks.tolist()
-
-
-        if isinstance(toks, str):
-            return s_to_id(toks)
-        if isinstance(toks[0], str):
-            return list(map(s_to_id, toks))
-        elif isinstance(toks[0], list):
-            return [list(map(s_to_id, tok)) for tok in toks]
-        else:
-            raise TypeError(f"'toks' must be 'list' or 'int' type. Got {type(toks)}")
+        return list(map(s_to_id, toks))
 
     def itos(self, ids):
         def id_to_s(id_):
@@ -79,18 +74,33 @@ class Vocab:
 
             return tok
 
-        if isinstance(ids, torch.Tensor) or isinstance(ids, np.ndarray):
-            ids    = ids.tolist()
-
-
         if isinstance(ids, int):
             return id_to_s(ids)
-        if isinstance(ids[0], int):
+        if isinstance(ids, list):
             return list(map(id_to_s, ids))
-        elif isinstance(ids[0], list):
-            return [list(map(id_to_s, ids_)) for ids_ in ids]
         else:
             raise TypeError(f"'ids' must be 'list' or 'int' type. Got {type(ids)}")
+
+    def conv_ids_to_vecs(self, ids):
+        if isinstance(ids, torch.Tensor) or isinstance(ids, np.ndarray):
+            ids = ids.tolist()
+
+        def id_to_vec(id_):
+            if id_ == self.pad_id:
+                return self.pad_vec
+            elif id_ == self.cls_id:
+                return self.cls_vec
+            elif id_ == self.sep_id:
+                return self.sep_vec
+            else:
+                try:
+                    return self.glove_embd.get_vecs_by_tokens(self.itos(id_)).numpy()
+                except KeyError:
+                    return self.unk_vec
+
+        assert isinstance(ids, list), f"ids must be 'list' type. Got {type(ids)}"
+
+        return list(map(id_to_vec, ids))
 
 
 class CustomDataset(Dataset):
@@ -103,16 +113,16 @@ class CustomDataset(Dataset):
 
         self.nlp_bert   = BertTokenizer.from_pretrained(args.bert_model)
 
-        # NOTE: These two fields are for debugging only
         # self.docId          = None
         # self.ques_plain     = None
+
         self.ques           = None
         self.ques_mask      = None
-        self.ans1           = None # in token ID form, not embedded form
-        self.ans2           = None # in token ID form, not embedded form
+        self.ans1           = None
+        self.ans2           = None
         self.ans1_mask      = None
-        self.ans1_loss      = None
-        self.ans2_loss      = None
+        self.ans1_ids       = None
+        self.ans2_ids       = None
         self.paras          = None
         self.paras_mask     = None
 
@@ -135,8 +145,8 @@ class CustomDataset(Dataset):
             'ans1'          : self.ans1[idx],
             'ans2'          : self.ans2[idx],
             'ans1_mask'     : self.ans1_mask[idx],
-            'ans1_loss'     : self.ans1_loss[idx],
-            'ans2_loss'     : self.ans2_loss[idx],
+            'ans1_ids'      : self.ans1_ids[idx],
+            'ans2_ids'      : self.ans2_ids[idx],
             'paras'         : self.paras[idx],
             'paras_mask'    : self.paras_mask[idx]
         }
@@ -153,20 +163,15 @@ class CustomDataset(Dataset):
         """
 
         sent_       = sent.lower().split(' ')
+        sent_ids_   = self.vocab.stoi(sent_)
+        sent_ids_   = [self.vocab.cls_id] + sent_ids_ + [self.vocab.sep_id]
 
-        sent_       = self.nlp_bert.convert_tokens_to_ids(sent_)
-
-        cls_tok_id  = self.nlp_bert.cls_token_id
-        sep_tok_id  = self.nlp_bert.sep_token_id
-        pad_tok_id  = self.nlp_bert.pad_token_id
-
-        sent_       = [cls_tok_id] + sent_[:max_len-2] + [sep_tok_id]
-
-        sent_len_   = len(sent_)
+        sent_len_   = len(sent_ids_)
         sent_mask_  = np.array([1]*sent_len_ + [0]*(max_len - sent_len_), dtype=np.float)
-        sent_       = np.array(sent_ + [pad_tok_id]*(max_len - sent_len_), dtype=np.int)
+        sent_ids_   = sent_ids_ + [self.vocab.pad_id]*(max_len - sent_len_)
+        sent_       = self.vocab.conv_ids_to_vecs(sent_ids_)
 
-        return sent_, np.array(sent_len_), sent_mask_
+        return sent_, sent_mask_, np.array(sent_ids_, dtype=np.int)
 
     def process_ans_loss(self, sent:str, max_len: int):
         sent_       = sent.lower().split(' ')
@@ -185,7 +190,7 @@ class CustomDataset(Dataset):
             ###########################
             # Process question
             ###########################
-            ques, _, ques_mask  = self.process_sent(entry.question, args.seq_len_ques)
+            ques, ques_mask, _  = self.process_sent(entry.question, args.seq_len_ques)
 
 
             ###########################
@@ -197,10 +202,8 @@ class CustomDataset(Dataset):
             if len(' '.split(answers[0])) < len(' '.split(answers[1])):
                 answers[0], answers[1] = answers[1], answers[0]
 
-            ans1, _, ans1_mask  = self.process_sent(answers[0], args.seq_len_ans)
-            ans2, _, _          = self.process_sent(answers[1], args.seq_len_ans)
-            ans1_loss           = self.process_ans_loss(answers[0], args.seq_len_ans)
-            ans2_loss           = self.process_ans_loss(answers[1], args.seq_len_ans)
+            ans1, ans1_mask, ans1_ids   = self.process_sent(answers[0], args.seq_len_ans)
+            ans2, _, ans2_ids           = self.process_sent(answers[0], args.seq_len_ans)
 
 
             ###########################
@@ -214,7 +217,7 @@ class CustomDataset(Dataset):
             # Process context
             paras, paras_mask = [], []
             for sent in contx:
-                sent, _, sent_mask = self.process_sent(sent, args.seq_len_para)
+                sent, sent_mask, _ = self.process_sent(sent, args.seq_len_para)
                 paras.append(np.expand_dims(sent, axis=0))
                 paras_mask.append(np.expand_dims(sent_mask, axis=0))
 
@@ -228,8 +231,8 @@ class CustomDataset(Dataset):
                 'ans1'          : ans1,
                 'ans2'          : ans2,
                 'ans1_mask'     : ans1_mask,
-                'ans1_loss'     : ans1_loss,
-                'ans2_loss'     : ans2_loss,
+                'ans1_ids'      : ans1_ids,
+                'ans2_ids'      : ans2_ids,
                 'paras'         : paras,
                 'paras_mask'    : paras_mask
             })
@@ -244,8 +247,8 @@ class CustomDataset(Dataset):
         self.ans1           = []
         self.ans2           = []
         self.ans1_mask      = []
-        self.ans1_loss      = []
-        self.ans2_loss      = []
+        self.ans1_ids       = []
+        self.ans2_ids       = []
         self.paras          = []
         self.paras_mask     = []
 
@@ -266,8 +269,8 @@ class CustomDataset(Dataset):
             self.ans1.append(entry['ans1'])
             self.ans2.append(entry['ans2'])
             self.ans1_mask.append(entry['ans1_mask'])
-            self.ans1_loss.append(entry['ans1_loss'])
-            self.ans2_loss.append(entry['ans2_loss'])
+            self.ans1_ids.append(entry['ans1_ids'])
+            self.ans2_ids.append(entry['ans2_ids'])
             self.paras.append(entry['paras'])
             self.paras_mask.append(entry['paras_mask'])
 
@@ -285,7 +288,6 @@ def build_vocab():
     log.setLevel(logging.ERROR)
 
     nlp_            = spacy.load("en_core_web_sm", disable=['ner', 'parser', 'tagger'])
-    nlp_.max_length  = 2500000
 
 
     word_count      = defaultdict(int)
