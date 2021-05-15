@@ -35,7 +35,8 @@ class  NarrativePipeline(torch_nn.Module):
         ####################
         # Embed question and context with FineGrain
         ####################
-        ques, paras, ans    = self.embd_layer(ques, paras, ans, ques_mask, paras_mask, ans_mask)
+        ques, paras, ans = self.embd_layer(ques, paras, ans,
+                                           ques_mask, paras_mask, ans_mask)
         # ques  : [b, seq_len_ques, d_hid]
         # paras : [b, seq_len_contx=n_paras*seq_len_para, d_hid]
         # ans   : [b, seq_len_ans, d_hid]
@@ -75,6 +76,8 @@ class Trainer():
 
         self.vocab  = Vocab(PATH['vocab'])
 
+        self.first_time = True
+
     def save_model(self, model):
         """
         Save model during training
@@ -96,7 +99,7 @@ class Trainer():
 
         return model
 
-    def save_checkpoint(self, model, optimizer, scheduler, epoch, best_loss_test):
+    def save_checkpoint(self, model: NarrativePipeline, optimizer, scheduler, epoch, best_loss_test):
         """Save training checkpoint.
 
         Args:
@@ -113,6 +116,9 @@ class Trainer():
                'sched_state'    : scheduler.state_dict(),
                'best_loss_test' : best_loss_test
             }, PATH['saved_chkpoint'])
+
+        ## Save tensors belonging to MemoryModule
+        model.reasoning.save_memory()
 
     def load_checkpoint(self):
         """Load state of model and optimizer for continuing training.
