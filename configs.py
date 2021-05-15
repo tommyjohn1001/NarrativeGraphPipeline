@@ -47,8 +47,6 @@ paths_bert   = [
 for path in paths_bert:
     if os.path.isdir(path):
         args.bert_model = path
-    
-
 args.seq_len_ques       = 40
 args.seq_len_para       = 50
 args.seq_len_ans        = 40        # maximum answer length of dataset
@@ -61,8 +59,8 @@ args.d_vocab            = 27156     # Vocab size
 args.dropout            = 0.2
 args.n_layers           = 5
 
-args.beam_size          = 8
-args.n_gram_beam        = 5
+args.beam_size          = 20
+args.n_gram_beam        = 10
 
 
 ###############################

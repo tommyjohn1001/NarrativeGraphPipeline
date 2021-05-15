@@ -54,7 +54,7 @@ class IntrospectiveAlignmentLayer(torch_nn.Module):
         A   = torch.bmm(torch_f.softmax(E, dim=1), H_q)
         # A: [batch, seq_len_contx, d_hid]
 
-        # Reasoning over alignments
+        # reasoning over alignments
         tmp = torch.cat((A, H_c, A - H_c, A * H_c), dim=-1)
         # tmp: [batch, seq_len_contx, 4*d_hid]
         G   = self.linearReason(tmp)

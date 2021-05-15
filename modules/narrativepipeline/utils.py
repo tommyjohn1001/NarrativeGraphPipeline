@@ -112,6 +112,7 @@ class CustomDataset(Dataset):
         self.ans2           = None # in token ID form, not embedded form
         self.ans1_mask      = None
         self.ans1_loss      = None
+        self.ans2_loss      = None
         self.paras          = None
         self.paras_mask     = None
 
@@ -135,6 +136,7 @@ class CustomDataset(Dataset):
             'ans2'          : self.ans2[idx],
             'ans1_mask'     : self.ans1_mask[idx],
             'ans1_loss'     : self.ans1_loss[idx],
+            'ans2_loss'     : self.ans2_loss[idx],
             'paras'         : self.paras[idx],
             'paras_mask'    : self.paras_mask[idx]
         }
@@ -198,6 +200,7 @@ class CustomDataset(Dataset):
             ans1, _, ans1_mask  = self.process_sent(answers[0], args.seq_len_ans)
             ans2, _, _          = self.process_sent(answers[1], args.seq_len_ans)
             ans1_loss           = self.process_ans_loss(answers[0], args.seq_len_ans)
+            ans2_loss           = self.process_ans_loss(answers[1], args.seq_len_ans)
 
 
             ###########################
@@ -226,6 +229,7 @@ class CustomDataset(Dataset):
                 'ans2'          : ans2,
                 'ans1_mask'     : ans1_mask,
                 'ans1_loss'     : ans1_loss,
+                'ans2_loss'     : ans2_loss,
                 'paras'         : paras,
                 'paras_mask'    : paras_mask
             })
@@ -241,6 +245,7 @@ class CustomDataset(Dataset):
         self.ans2           = []
         self.ans1_mask      = []
         self.ans1_loss      = []
+        self.ans2_loss      = []
         self.paras          = []
         self.paras_mask     = []
 
@@ -262,6 +267,7 @@ class CustomDataset(Dataset):
             self.ans2.append(entry['ans2'])
             self.ans1_mask.append(entry['ans1_mask'])
             self.ans1_loss.append(entry['ans1_loss'])
+            self.ans2_loss.append(entry['ans2_loss'])
             self.paras.append(entry['paras'])
             self.paras_mask.append(entry['paras_mask'])
 

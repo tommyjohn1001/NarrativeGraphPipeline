@@ -2,11 +2,6 @@
 
 ### This file contains changes and modifications during developing.
 
-## May 14 2021, 10:26
-- Add new reasoning module: *MemoryBased* that is based on Memory network
-- Modify in module *FineGrain*: convert from NN to Linear
-- Modify module *TransDecoder* and *NarrativePipeline* to fit with new reasoning module
-
 ## May 11 2021, 16:32
 - Add new implementation of *BeamSearch*
 - Simplify `launcher.sh`

@@ -1,10 +1,10 @@
+
 import re
 
 import torch.nn as torch_nn
 import torch
 
 from modules.utils import transpose
-from configs import args
 
 class AttentivePooling(torch_nn.Module):
     def __init__(self, dim):
@@ -159,6 +159,9 @@ class BeamSearch():
                 elif self.topk_strategy == "select_nucleus_sample_nobeam":
                     distribution        = torch.softmax(output, dim=0)
                     topk_dist, topk_tok = self.select_nucleus_sample_nobeam(distribution)
+                elif self.topk_strategy == "select_mix_beam":
+                    distribution        = torch.softmax(output, dim=0)
+                    topk_dist, topk_tok = self.select_mix_beam(distribution)
                 else:
                     raise TypeError
                 # topk_dist, topk_tok: [beam_size]
@@ -282,5 +285,22 @@ class BeamSearch():
             accum += culmulative
         topBeam_tok     = [tok]
         topBeam_dist    = torch.log(torch.FloatTensor((culmulative, )))
+
+        return topBeam_dist, topBeam_tok
+
+    def select_mix_beam(self, distribution):
+        temperature     = 1.1
+
+        top_dist, top_tok = torch.topk(distribution, 10000, 0)
+
+        top_dist = top_dist / top_dist.sum(dim=0) / temperature
+
+        topBeam_dist, topBeam_tok = torch.topk(top_dist, self.beam_size, 0)
+        topBeam_tok = top_tok[topBeam_tok]
+        topBeam_dist= torch.log_softmax(topBeam_dist, dim=0)
+
+        # indx = torch.randint(0, 1000, (1,))
+        # topBeam_dist = torch.log(top_dist[indx])
+        # topBeam_tok  = top_tok[indx]
 
         return topBeam_dist, topBeam_tok
