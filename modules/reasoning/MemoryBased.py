@@ -34,7 +34,7 @@ class CustomTransEnc(torch_nn.Module):
         self.norm       = norm
         self.fc         = torch_nn.Sequential(
             torch_nn.Linear(args.d_hid, args.d_hid),
-            torch_nn.Tanh(),
+            torch_nn.ReLU(),
             torch_nn.Dropout(args.dropout)
         )
 
@@ -197,13 +197,13 @@ class Memory(torch_nn.Module):
     def get_final_memory(self):
         attn_mask   = torch.softmax(self.attn_mask, dim=0)
         attn_mask   = attn_mask.repeat(1, args.seq_len_ques + args.seq_len_para, 1, args.d_hid)
-        # [n_paras, b, seq_len_ques + seq_len_para, d_hid]
+        # [n_paras, seq_len_ques + seq_len_para, b, d_hid]
 
         memory_     = [t.unsqueeze(0) for t in self.memory]
         memory_     = torch.vstack(memory_)
-        # [n_paras, b, seq_len_ques + seq_len_para, d_hid]
+        # [n_paras, seq_len_ques + seq_len_para, b, d_hid]
 
-        return (memory_ * attn_mask).sum(dim=1)
+        return (memory_ * attn_mask).sum(dim=0)
 
     def get_mem_cell(self, nth_para):
         return self.memory[nth_para]
@@ -221,19 +221,28 @@ class MemoryBasedReasoning(torch_nn.Module):
 
         self.mlp_ques_para  = torch_nn.Sequential(
             torch_nn.Linear(args.d_hid, args.d_hid),
-            torch_nn.Tanh(),
+            torch_nn.GELU(),
             torch_nn.Dropout(args.dropout)
         )
 
-        self.trans_enc      = CustomTransEnc(CustomTransEncLayer(d_model=args.d_hid, nhead=8),
-                                             num_layers=6)
+        self.trans_enc      = CustomTransEnc(CustomTransEncLayer(d_model=args.d_hid, nhead=args.trans_nheads),
+                                             num_layers=args.trans_nlayers)
 
 
         self.memory     = Memory()
 
+        self.linearY    = torch_nn.Sequential(
+            torch_nn.Linear((args.seq_len_ques + args.seq_len_para) * args.d_hid,\
+                            args.d_hid),
+            torch_nn.GELU(),
+            torch_nn.Dropout(args.dropout)
+        )
+
     def forward(self, ques, paras):
         # ques  : [b, seq_len_ques, d_hid]
         # paras : [b, n_paras, seq_len_para, d_hid]
+
+        b, n_paras, _, _ = paras.shape
 
 
         ## Unsqueeze and repeat tensor 'ques' to match shape of 'paras'
@@ -241,6 +250,7 @@ class MemoryBasedReasoning(torch_nn.Module):
         ques_paras   = torch.cat((ques, paras), dim=2).permute(1, 2, 0, 3)
         # [n_paras, seq_len_ques + seq_len_para, b, d_hid]
 
+        Y = []
 
         for nth_para in range(args.n_paras):
             ques_para   = ques_paras[nth_para]
@@ -254,11 +264,28 @@ class MemoryBasedReasoning(torch_nn.Module):
             output      = self.trans_enc(memory_cell, ques_para)
             # [seq_len_ques + seq_len_para, b, d_hid]
 
-
             self.memory.update_mem(nth_para, ques_para, output)
 
-        Y = self.memory.get_final_memory()
-        # [b, seq_len_ques + seq_len_para, d_hid]
+            Y.append(output.unsqueeze(0))
+
+        final   = self.memory.get_final_memory()
+        # [seq_len_ques + seq_len_para, args.batch, d_hid]
+
+        # We do not take entire tensor 'final' but chunk of it
+        # because tensor 'final' is for batch_size whereas in last batch step,
+        # the number of datapoints are not equal batch_size
+        Y.append(final[:, :b, :].unsqueeze(0))
+        Y   = torch.cat(Y, dim=0).to(args.device).permute(0, 2, 1, 3)
+        # [n_paras + 1, b, seq_len_ques + seq_len_para, d_hid]
+        print(f"Y: {Y.shape}")
+        Y   = Y.reshape(n_paras + 1, b, -1)
+        # [n_paras+1, b, (seq_len_ques + seq_len_para)*d_hid]
+
+        Y   = self.linearY(Y)
+        # [n_paras + 1, b, d_hid]
+
+
+        print(f"Y = {Y.shape}")
 
         return Y
 

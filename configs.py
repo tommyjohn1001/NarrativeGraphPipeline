@@ -15,8 +15,6 @@ parser.add_argument("--num_proc", type=int, default=4, help="number of processes
 parser.add_argument("--n_epochs", type=int, default=10)
 parser.add_argument("--n_shards", type=int, help="Number of chunks to split from large dataset",
                     default=8)
-parser.add_argument("--device", type=str, default="default", choices=["default", "cpu", "cuda"],
-                    help="Select device to run")
 parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--w_decay", type=float, default=0, help="Weight decay")
 parser.add_argument("--task", type=str, default="train", help="train | infer")
@@ -31,37 +29,49 @@ args, _ = parser.parse_known_args()
 ###############################
 
 
-## args = device
-if args.device == "default":
-    args.device     = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-else:
-    args.device = torch.device(args.device)
-
+# args.device     = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+args.device     = torch.device('cpu')
 args.multi_gpus = torch.cuda.device_count() > 0
 
 args.bert_model         = "bert-base-uncased"
 paths_bert   = [
     "/root/bert-base-uncased/",
     "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased/",
-    "/home/tommy/Projects"
+    "/home/tommy/Projects/_pretrained/BERT/bert-base-uncased/"
 ]
 for path in paths_bert:
     if os.path.isdir(path):
         args.bert_model = path
+
+args.glove_embd         = None
+paths_glove   = [
+    ".vector_cache/",
+    "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased/",
+    "/home/tommy/Projects/_pretrained/GloVe/"
+]
+for path in paths_glove:
+    if os.path.isdir(path):
+        args.glove_embd = path
+
+assert args.glove_embd is not None, "GloVe not found."
+
 args.seq_len_ques       = 40 + 2    # The reason why seq pluses 2 is for CLS
-args.seq_len_para       = 500 + 2   # and SEP token
+args.seq_len_para       = 100 + 2   # and SEP token
 args.seq_len_ans        = 40 + 2    # maximum answer length of dataset
-args.n_paras            = 200
+args.n_paras            = 35
 args.d_embd             = 200
-args.d_hid              = 256
+args.d_hid              = 64
 args.max_len_ans        = 12        # maximum inferring steps of decoder
 args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
 args.d_vocab            = 27156     # Vocab size
-args.dropout            = 0.2
+args.dropout            = 0.15
 args.n_layers           = 5
 
 args.beam_size          = 20
 args.n_gram_beam        = 10
+
+args.trans_nheads       = 4
+args.trans_nlayers      = 3
 
 
 ###############################

@@ -10,7 +10,7 @@ from transformers import AdamW
 from modules.narrativepipeline.utils import CustomDataset, build_vocab, Vocab
 from modules.ans_infer.Transformer import TransDecoder
 from modules.utils import check_exist
-from modules.reasoning.IAL import IntrospectiveAlignmentLayer
+from modules.reasoning.MemoryBased import MemoryBasedReasoning
 from modules.finegrained.BertBasedEmbd import BertBasedEmbd
 from configs import args, logging, PATH
 
@@ -19,7 +19,7 @@ class  NarrativePipeline(torch_nn.Module):
         super().__init__()
 
         self.embd_layer = BertBasedEmbd()
-        self.reasoning  = IntrospectiveAlignmentLayer()
+        self.reasoning  = MemoryBasedReasoning()
         self.ans_infer  = TransDecoder(vocab, self.embd_layer.embedding)
 
     def forward(self, ques, ques_mask, ans, ans_mask,
@@ -38,20 +38,18 @@ class  NarrativePipeline(torch_nn.Module):
         ques, paras, ans = self.embd_layer(ques, paras, ans,
                                            ques_mask, paras_mask, ans_mask)
         # ques  : [b, seq_len_ques, d_hid]
-        # paras : [b, seq_len_contx=n_paras*seq_len_para, d_hid]
+        # paras : [b, n_paras, seq_len_para, d_hid]
         # ans   : [b, seq_len_ans, d_hid]
 
-        print(ques.shape)
-        print(paras.shape)
-        print(ans.shape)
-
+        print("Finish 1")
 
         ####################
         # Do reasoning with IAL
         ####################
         Y       = self.reasoning(ques, paras)
-        # Y: [b, seq_len_contx, 2*d_hid]
+        # Y: [n_paras + 1, b, d_hid]
 
+        print("Finish 2")
 
         ####################
         # Generate answer with PGD

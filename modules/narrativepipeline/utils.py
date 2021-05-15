@@ -25,7 +25,7 @@ class Vocab:
         if path_vocab is None:
             path_vocab  =PATH['vocab']
 
-        self.glove_embd = Vectors("glove.6B.200d.txt", cache=".vector_cache/")
+        self.glove_embd = Vectors("glove.6B.200d.txt", cache=args.glove_embd)
 
         self.dict_stoi   = dict()
         self.dict_itos   = dict()

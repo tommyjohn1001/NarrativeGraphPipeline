@@ -137,14 +137,7 @@ class NonLinear(torch_nn.Module):
         super().__init__()
 
         self.linear     = torch_nn.Linear(d_in, d_out)
-
-        if activation == "relu":
-            self.activation = torch_nn.ReLU()
-        elif activation == "tanh":
-            self.activation = torch_nn.Tanh()
-        else:
-            self.activation = torch_nn.Sigmoid()
-
+        self.activation = torch_nn.GELU()
         self.dropout    = torch_nn.Dropout(dropout)
 
     def forward(self, X):

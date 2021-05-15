@@ -70,12 +70,10 @@ class BertBasedEmbd(torch_nn.Module):
         # paras     : [b*n_paras, seq_len_para, 768]
         # paras_mask: [b*n_paras, seq_len_para]
 
-        print(paras.shape)
-
         paras   = self.embedding(paras, paras_mask)
         # [b*n_paras, seq_len_para, 768]
-        paras   = paras.view((b, -1, 768))
-        # [b, seq_len_contx=n_paras*seq_len_para, 768]
+        paras   = paras.view((b, -1, seq_len_para, 768))
+        # [b, n_paras, seq_len_para, 768]
 
 
         ###################
@@ -93,7 +91,7 @@ class BertBasedEmbd(torch_nn.Module):
         paras   = self.linear2(paras)
         ans     = self.linear2(ans)
         # ques  : [b, seq_len_ques, d_hid]
-        # paras : [b, seq_len_contx, d_hid]
+        # paras : [b, n_paras, seq_len_para, 768]
         # ans   : [b, seq_len_ans, d_hid]
 
         return ques, paras, ans
