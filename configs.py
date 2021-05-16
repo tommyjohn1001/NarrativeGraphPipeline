@@ -13,8 +13,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--batch", type=int, default=5)
 parser.add_argument("--num_proc", type=int, default=4, help="number of processes")
 parser.add_argument("--n_epochs", type=int, default=10)
-parser.add_argument("--n_shards", type=int, help="Number of chunks to split from large dataset",
-                    default=8)
 parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--w_decay", type=float, default=0, help="Weight decay")
 parser.add_argument("--task", type=str, default="train", help="train | infer")
@@ -33,27 +31,6 @@ args, _ = parser.parse_known_args()
 args.device     = torch.device('cpu')
 args.multi_gpus = torch.cuda.device_count() > 0
 
-args.bert_model         = "bert-base-uncased"
-paths_bert   = [
-    "/root/bert-base-uncased/",
-    "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased/",
-    "/home/tommy/Projects/_pretrained/BERT/bert-base-uncased/"
-]
-for path in paths_bert:
-    if os.path.isdir(path):
-        args.bert_model = path
-
-args.glove_embd         = None
-paths_glove   = [
-    ".vector_cache/",
-    "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased/",
-    "/home/tommy/Projects/_pretrained/GloVe/"
-]
-for path in paths_glove:
-    if os.path.isdir(path):
-        args.glove_embd = path
-
-assert args.glove_embd is not None, "GloVe not found."
 
 args.seq_len_ques       = 40  + 2   # The reason why sequence length of ques, contx and ans
 args.seq_len_para       = 120 + 2   # plus 2 is for CLS and SEP token
@@ -78,18 +55,46 @@ args.trans_nlayers      = 3
 # Config path of backup files
 ###############################
 PATH    = {
+    'raw_data_dir'      : [
+        "/Users/hoangle/Projects/VinAI/_data/NarrativeQA",
+        "/home/tommy/Projects/_data/NarrativeQA",
+        "/home/ubuntu/NarrativeQA"
+    ],
+    'bert'              : [
+        "/root/bert-base-uncased",
+        "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased",
+        "/home/tommy/Projects/_pretrained/BERT/bert-base-uncased"
+    ],
+    'glove_embd'        : [
+        ".vector_cache/",
+        "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased",
+        "/home/tommy/Projects/_pretrained/GloVe"
+    ],
+
     ## Paths associated with Data Reading
-    'dataset_para'      : "backup/[SPLIT]/data_[SHARD].csv",
-    'processed_contx'   : "backup/proc_contx_[SPLIT].json",
+    'processed_contx'   : "backup/proc_contx/[ID].json",
+    'dataset'           : "backup/[SPLIT]/data_[SHARD].csv",
     'vocab'             : "backup/vocab.txt",
+
+    ## Paths associated with models
     'saved_model'       : "backup/model.pt",
     'saved_chkpoint'    : "backup/chkpoint.pth.tar",
     'prediction'        : "backup/predictions.json",
-    'log'               : "run.log",
-    'memory'            : "backup/memory.pt"
+    'memory'            : "backup/memory.pt",
+
+    'log'               : "run.log"
 }
 
-
+for key, val in PATH.items():
+    if isinstance(val, list):
+        is_found = False
+        for path in val:
+            if os.path.isdir(path):
+                is_found  = True
+                PATH[key] = path
+                break
+        if not is_found:
+            raise FileNotFoundError(f"{key} not found")
 ###############################
 # Config logging
 ###############################

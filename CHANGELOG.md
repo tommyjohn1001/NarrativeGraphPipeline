@@ -2,6 +2,10 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 16 2021, 18:05
+- Modify paths in 'configs.py' to make them consistent and add checking existence with paths
+- Reimplement module 'DataReading'
+
 ## May 16 2021, 11:16
 - Modify module *DataReading* to fit with old para separation strategy of original paper
 - Increase 'seq_len_para' and decrease 'n_paras' in 'configs.py'

@@ -17,7 +17,7 @@ class FineGrain(torch_nn.Module):
         self.d_emb_bert = 768
 
         ## Modules for embedding
-        self.embedding      = BertModel.from_pretrained(args.bert_model)
+        self.embedding      = BertModel.from_pretrained(PATH['bert'])
         # for param in self.embedding.parameters():
         #     param.requires_grad = False
 

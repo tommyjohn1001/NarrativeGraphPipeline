@@ -10,7 +10,7 @@ class BertEmbedding(torch_nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.embedding  = BertModel.from_pretrained(args.bert_model)
+        self.embedding  = BertModel.from_pretrained(PATH['bert'])
         for param in self.embedding.parameters():
             param.requires_grad = False
 

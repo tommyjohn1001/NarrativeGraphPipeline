@@ -25,7 +25,7 @@ class Vocab:
         if path_vocab is None:
             path_vocab  =PATH['vocab']
 
-        self.glove_embd = Vectors("glove.6B.200d.txt", cache=args.glove_embd)
+        self.glove_embd = Vectors("glove.6B.200d.txt", cache=PATH['glove_embd'])
 
         self.dict_stoi   = dict()
         self.dict_itos   = dict()
@@ -111,7 +111,7 @@ class CustomDataset(Dataset):
         # Read vocab
         self.vocab      = vocab
 
-        self.nlp_bert   = BertTokenizer.from_pretrained(args.bert_model)
+        self.nlp_bert   = BertTokenizer.from_pretrained(PATH['bert'])
 
         # self.docId          = None
         # self.ques_plain     = None
