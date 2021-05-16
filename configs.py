@@ -55,10 +55,10 @@ for path in paths_glove:
 
 assert args.glove_embd is not None, "GloVe not found."
 
-args.seq_len_ques       = 40 + 2    # The reason why seq pluses 2 is for CLS
-args.seq_len_para       = 100 + 2   # and SEP token
-args.seq_len_ans        = 40 + 2    # maximum answer length of dataset
-args.n_paras            = 35
+args.seq_len_ques       = 40  + 2   # The reason why sequence length of ques, contx and ans
+args.seq_len_para       = 120 + 2   # plus 2 is for CLS and SEP token
+args.seq_len_ans        = 40  + 2   # maximum answer length of dataset
+args.n_paras            = 30
 args.d_embd             = 200
 args.d_hid              = 64
 args.max_len_ans        = 12        # maximum inferring steps of decoder

@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 16 2021, 11:16
+- Modify module *DataReading* to fit with old para separation strategy of original paper
+- Increase 'seq_len_para' and decrease 'n_paras' in 'configs.py'
+- Apply data *version 3* for training
+
+
 ## May 15 2021, 10:26
 - Take *GloVe embedding* back and modify class *Vocab*
 - Edit some fields during training

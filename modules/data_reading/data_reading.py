@@ -92,132 +92,37 @@ class DataReading():
 
         return context
 
-    def process_context_movie(self, context, start, end) -> list:
-        """Process context and split into paragrapgs. Dedicated to movie context.
-
-        Args:
-            context (str): context (book or movie script)
-            start (str): start word of context
-            end (str): end word of context
-
-        Returns:
-            list: list of paras
-        """
-
-        ## Extract text from HTML
-        context = self.extract_html(context)
-
-        ## Use field 'start' and 'end' provided
-        context = self.extract_start_end(context, start, end)
-
-        ## Clean context and split into paras
-        sentences   = self.clean_context_movie(context).split('\n')
-
-        paras       = np.array([])
-        n_tok       = 0
-        para        = []
-        for sent in sentences:
-            ## Tokenize, remove stopword
-            sent_   = [tok.text for tok in nlp(sent)
-                       if not (tok.is_stop or tok.is_punct)]
-
-            ## Concat sentece if not exceed paragraph max len
-            if n_tok + len(sent_) < args.seq_len_para:
-                n_tok   += len(sent_)
-                para.extend(sent_)
-            else:
-                paras   = np.concatenate((paras, self.export_para(para)))
-                n_tok   = 0
-                para    = []
-
-
-        return paras.tolist()
-
-    def process_context_gutenberg(self, context, start, end):
-        """Process context and split into paragrapgs. Dedicated to gutenberg context.
-
-        Args:
-            context (str): context (book or movie script)
-            start (str): start word of context
-            end (str): end word of context
-
-        Returns:
-            list: list of paras
-        """
-
-        ## Extract text from HTML
-        context = self.extract_html(context)
-
-        ## Use field 'start' and 'end' provided
-        context = self.extract_start_end(context, start, end)
-
-        ## Clean context and split into paras
-        sentences   = self.clean_context_gutenberg(context).split('\n')
-
-        paras       = np.array([])
-        n_tok       = 0
-        para        = []
-        for sent in sentences:
-            ## Tokenize, remove stopword
-            sent_   = [tok.text for tok in nlp(sent)
-                       if not (tok.is_stop or tok.is_punct)]
-
-            if len(sent_) > args.seq_len_para:
-                # Long paragraph: split into sentences and
-                # apply concatenating strategy
-
-                # Finish concateraning para
-                if len(para) > 0:
-                    paras   = np.concatenate((paras, self.export_para(para)))
-                    n_tok   = 0
-                    para    = []
-
-                # Split into sentences and
-                # apply concatenating strategy
-                for sub_sent in nlp(sent).sents:
-                    sent_   = [tok.text for tok in sub_sent
-                               if not (tok.is_stop or tok.is_punct)]
-
-                    if n_tok + len(sent_) < args.seq_len_para:
-                        n_tok   += len(sent_)
-                        para.extend(sent_)
-                    else:
-                        paras   = np.concatenate((paras, self.export_para(para)))
-                        n_tok   = len(sent_)
-                        para    = sent_
-
-                if len(para) > 0:
-                    paras   = np.concatenate((paras, self.export_para(para)))
-                    n_tok   = 0
-                    para    = []
-
-            else:
-                if n_tok + len(sent_) < args.seq_len_para:
-                    n_tok   += len(sent_)
-                    para.extend(sent_)
-                else:
-                    paras   = np.concatenate((paras, self.export_para(para)))
-                    n_tok   = len(sent_)
-                    para    = sent_
-
-        if para != "":
-            paras   = np.concatenate((paras, self.export_para(para)))
-            n_tok   = len(sent_)
-            para    = sent_
-
-
-        return paras.tolist()
-
-
     def f_process_contx(self, keys, queue, arg):
         processed_contx = arg[0]
         for key in keys:
             context, kind, start, end = processed_contx[key]
 
+
+            ## Extract text from HTML
+            context = self.extract_html(context)
+
+            ## Use field 'start' and 'end' provided
+            context = self.extract_start_end(context, start, end)
+
+            ## Clean context and split into paras
             if kind == "movie":
-                paras   = self.process_context_movie(context, start, end)
+                sentences   = self.clean_context_movie(context).split('\n')
             else:
-                paras   = self.process_context_gutenberg(context, start, end)
+                sentences   = self.clean_context_gutenberg(context).split('\n')
+
+
+            tokens, paras   = np.array([]), np.array([])
+            for sent in sentences:
+                ## Tokenize, remove stopword
+                tokens_ = [tok.text for tok in nlp(sent)
+                           if not (tok.is_stop or tok.is_punct)]
+                paras   = np.concatenate((tokens, tokens_))
+            len_para = args.seq_len_para - 2
+            for i in range(0, len(tokens), len_para):
+                para    = ' '.join(tokens[i: i+len_para])
+                para    = re.sub(r'( |\t){2,}', ' ', para).strip()
+
+                paras   = np.concatenate((paras, para))
 
             queue.put((key, paras))
 
@@ -265,60 +170,58 @@ class DataReading():
 
         return goldens
 
-    def process_entry(self, entries, queue, args):
+    def f_process_entry(self, entry):
         """This function is used to run in parallel to read and initially preprocess
         raw documents. Afterward, it puts a dict containing result into queue.
 
         Args:
             document (dict): a document of dataset
         """
-        processed_contx = args[0]
 
-        for entry in entries:
-            #########################
-            ## Preprocess context
-            #########################
-            paras   = processed_contx[entry['document']['id']]
+        #########################
+        ## Preprocess context
+        #########################
+        paras   = self.processed_contx[entry['document']['id']]
 
 
-            #########################
-            ## Preprocess question and answer
-            #########################
-            ques    = self.process_ques_ans(entry['question']['text'])
-            ans1    = self.process_ques_ans(entry['answers'][0]['text'])
-            answ2   = self.process_ques_ans(entry['answers'][1]['text'])
+        #########################
+        ## Preprocess question and answer
+        #########################
+        ques    = self.process_ques_ans(entry['question']['text'])
+        ans1    = self.process_ques_ans(entry['answers'][0]['text'])
+        answ2   = self.process_ques_ans(entry['answers'][1]['text'])
 
 
-            #########################
-            ## TfIdf vectorize
-            #########################
-            tfidfvectorizer = TfidfVectorizer(analyzer='word', stop_words='english',
-                                                ngram_range=(1, 3), max_features=500000)
+        #########################
+        ## TfIdf vectorize
+        #########################
+        tfidfvectorizer = TfidfVectorizer(analyzer='word', stop_words='english',
+                                            ngram_range=(1, 3), max_features=500000)
 
-            wm = tfidfvectorizer.fit_transform(paras + [ques, ans1, answ2]).toarray()
+        wm = tfidfvectorizer.fit_transform(paras + [ques, ans1, answ2]).toarray()
 
-            question, answer1, answer2 = len(wm) - 3, len(wm) - 2, len(wm) - 1
+        question, answer1, answer2 = len(wm) - 3, len(wm) - 2, len(wm) - 1
 
 
-            #########################
-            ## Find golden paragraphs from
-            ## question and answers
-            #########################
-            golden_paras_ques   = self.find_golden(question, wm)
+        #########################
+        ## Find golden paragraphs from
+        ## question and answers
+        #########################
+        golden_paras_ques   = self.find_golden(question, wm)
 
-            golden_paras_answ1  = self.find_golden(answer1, wm)
-            golden_paras_answ2  = self.find_golden(answer2, wm)
-            golden_paras_answ   = golden_paras_answ1 | golden_paras_answ2
+        golden_paras_answ1  = self.find_golden(answer1, wm)
+        golden_paras_answ2  = self.find_golden(answer2, wm)
+        golden_paras_answ   = golden_paras_answ1 | golden_paras_answ2
 
 
 
-            queue.put({
-                'doc_id'    : entry['document']['id'],
-                'question'  : ' '.join(entry['question']['tokens']),
-                'answers'   : [' '.join(x['tokens']) for x in entry['answers']],
-                'En'        : [paras[i] for i in golden_paras_answ],
-                'Hn'        : [paras[i] for i in golden_paras_ques]
-            })
+        return {
+            'doc_id'    : entry['document']['id'],
+            'question'  : ' '.join(entry['question']['tokens']),
+            'answers'   : [' '.join(x['tokens']) for x in entry['answers']],
+            'En'        : [paras[i] for i in golden_paras_answ],
+            'Hn'        : [paras[i] for i in golden_paras_ques]
+        }
 
 
     def trigger_reading_data(self):
@@ -381,11 +284,7 @@ class DataReading():
             #########################
             # Process each entry of dataset
             #########################
-            shared_dict = Manager().dict()
-            shared_dict.update(self.processed_contx)
-            list_documents  = ParallelHelper(self.process_entry, dataset,
-                                             lambda d, l, h: d.select(range(l,h)),
-                                             args.num_proc, shared_dict).launch()
+            list_documents  = [self.f_process_entry(entry) for entry in dataset]
 
             save_object(path, pd.DataFrame(list_documents))
 
