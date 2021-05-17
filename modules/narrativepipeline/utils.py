@@ -7,7 +7,6 @@ from torch.utils.data import Dataset
 from torchtext.vocab import Vectors
 import torch
 from transformers import BertTokenizer
-from datasets import load_dataset
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
@@ -292,19 +291,17 @@ def build_vocab():
 
     word_count      = defaultdict(int)
 
-    answer_toks     = set()
+    ques_answer_toks= set()
 
 
-    # Read stories in train, test, valid set
-    for split in ["train", "test", "validation"]:
-        logging.info(f"Process split: {split}")
+    # Read processed contexts
 
-        path    = PATH['processed_contx'].replace("[SPLIT]", split)
+    paths    = glob.glob(PATH['processed_contx'].replace("[ID]", "*"))
+    for path in tqdm(paths, desc="Get context"):
         with open(path, 'r') as d_file:
-            contexts    = json.load(d_file)
+            context    = json.load(d_file)
 
-        # Add tokens in context to global vocab
-        for context in tqdm(contexts.values(), desc="Get context"):
+            # Add tokens in context to global vocab
             for para in context:
                 for tok in nlp_(para):
                     if  not tok.is_punct and\
@@ -312,12 +309,15 @@ def build_vocab():
                         not tok.like_url:
                         word_count[tok.text] += 1
 
-        # Add tokens in ans1 and ans2 to global vocab
-        dataset = load_dataset("narrativeqa", split=split)
-        for entry in tqdm(dataset, total=len(dataset), desc="Get answers"):
-            for tok in entry['answers'][0]['tokens'] + entry['answers'][1]['tokens']:
-                answer_toks.add(tok.lower())
+    # Add tokens in ans1 ans2, question to global vocab
+    documents   = pd.read_csv(f"{PATH['raw_data_dir']}/qaps.csv", header=0, index_col=None)
+    for entry in tqdm(documents.itertuples(), total=len(documents), desc="Get question and answers"):
+        ques    = entry.question_tokenized.lower().split(' ')
+        ans1    = entry.answer1_tokenized.lower().split(' ')
+        ans2    = entry.answer2_tokenized.lower().split(' ')
 
+        for tok in ques + ans1 + ans2:
+            ques_answer_toks.add(tok)
 
     # Sort word_count dict and filter top 1000 words
     words = sorted(word_count.items(), key=lambda item: item[1], reverse=True)
@@ -325,14 +325,11 @@ def build_vocab():
 
     # words = set(w for w, occurence in word_count.items() if occurence >= args.min_count_PGD)
 
-    words = words.union(answer_toks)
+    words = words.union(ques_answer_toks)
 
     # Write vocab to TXT file
     with open(PATH['vocab'], 'w+') as vocab_file:
         for word in ["[pad]", "[cls]", "[sep]", "[unk]"]:
             vocab_file.write(word + '\n')
-
-    # Write vocab to TXT file
-    with open(PATH['vocab'], 'w+') as vocab_file:
         for word in words:
             vocab_file.write(word + '\n')

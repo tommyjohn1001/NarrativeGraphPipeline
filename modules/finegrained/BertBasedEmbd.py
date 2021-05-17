@@ -2,7 +2,7 @@
 from transformers import BertModel
 import torch.nn as torch_nn
 
-from configs import args
+from configs import args, PATH
 
 
 class BertEmbedding(torch_nn.Module):

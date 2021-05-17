@@ -3,6 +3,7 @@ import re, json, os
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from tqdm import tqdm
 from bs4 import BeautifulSoup
 import pandas as pd
 import numpy as np
@@ -191,7 +192,7 @@ class EntryProcessor():
         return goldens
 
     def read_processed_contx(self, id_):
-        path    = PATH['processed_contx'].replace("[SPLIT]")
+        path    = PATH['processed_contx'].replace("[ID]", id_)
         assert os.path.isfile(path), f"Context with id {id_} not found."
         with open(path, 'r') as d_file:
             return json.load(d_file)
@@ -204,15 +205,15 @@ class EntryProcessor():
             document (dict): a document of dataset
         """
 
-        paras   = self.read_processed_contx(entry['document_id'])
+        paras   = self.read_processed_contx(entry.document_id)
 
 
         #########################
         ## Preprocess question and answer
         #########################
-        ques    = self.process_ques_ans(entry['question'])
-        ans1    = self.process_ques_ans(entry['answer1'])
-        answ2   = self.process_ques_ans(entry['answer2'])
+        ques    = self.process_ques_ans(entry.question)
+        ans1    = self.process_ques_ans(entry.answer1)
+        answ2   = self.process_ques_ans(entry.answer2)
 
 
         #########################
@@ -238,15 +239,68 @@ class EntryProcessor():
 
 
         return {
-            'doc_id'    : entry['document_id'],
-            'question'  : ' '.joind(entry['question_tokenized']),
+            'doc_id'    : entry.document_id,
+            'question'  : ' '.join(entry.question_tokenized),
             'answers'   : [
-                ' '.join(entry['answer1_tokenized']),
-                ' '.join(entry['answer2_tokenized'])
+                ' '.join(entry.answer1_tokenized),
+                ' '.join(entry.answer2_tokenized)
             ],
             'En'        : [paras[i] for i in golden_paras_answ],
             'Hn'        : [paras[i] for i in golden_paras_ques]
         }
+
+    def f_process_entry2(self, entries, queue, arg):
+        """This function is used to run in parallel to read and initially preprocess
+        raw documents. Afterward, it puts a dict containing result into queue.
+
+        Args:
+            document (dict): a document of dataset
+        """
+
+        for entry in entries.itertuples():
+
+            paras   = self.read_processed_contx(entry.document_id)
+
+            #########################
+            ## Preprocess question and answer
+            #########################
+            ques    = self.process_ques_ans(entry.question)
+            ans1    = self.process_ques_ans(entry.answer1)
+            answ2   = self.process_ques_ans(entry.answer2)
+
+
+            #########################
+            ## TfIdf vectorize
+            #########################
+            tfidfvectorizer = TfidfVectorizer(analyzer='word', stop_words='english',
+                                                ngram_range=(1, 3), max_features=500000)
+
+            wm = tfidfvectorizer.fit_transform(paras + [ques, ans1, answ2]).toarray()
+
+            question, answer1, answer2 = len(wm) - 3, len(wm) - 2, len(wm) - 1
+
+
+            #########################
+            ## Find golden paragraphs from
+            ## question and answers
+            #########################
+            golden_paras_ques   = self.find_golden(question, wm)
+
+            golden_paras_answ1  = self.find_golden(answer1, wm)
+            golden_paras_answ2  = self.find_golden(answer2, wm)
+            golden_paras_answ   = golden_paras_answ1 | golden_paras_answ2
+
+
+            queue.put({
+                'doc_id'    : entry.document_id,
+                'question'  : ' '.join(entry.question_tokenized),
+                'answers'   : [
+                    ' '.join(entry.answer1_tokenized),
+                    ' '.join(entry.answer2_tokenized)
+                ],
+                'En'        : [paras[i] for i in golden_paras_answ],
+                'Hn'        : [paras[i] for i in golden_paras_ques]
+            })
 
     def trigger_process_entries(self):
         """ Start processing pairs of question - context - answer
@@ -269,8 +323,12 @@ class EntryProcessor():
                 end_    = start_ + len(documents)//8
 
 
-                list_documents  = [self.f_process_entry(entry)
-                                   for entry in documents.iloc[start_:end_]]
+                # NOTE: This is for single processing
+                # list_documents  = [self.f_process_entry(entry)
+                #                    for entry in tqdm(documents.iloc[start_:end_].itertuples(), total=end_ - start_ )]
+                # NOTE: This is for multi processing
+                list_documents  = ParallelHelper(self.f_process_entry2, documents.iloc[start_:end_],
+                                                 lambda d, l, h: d.iloc[l:h], args.num_proc).launch()
 
                 save_object(path, pd.DataFrame(list_documents))
 
@@ -278,7 +336,8 @@ class EntryProcessor():
 if __name__ == '__main__':
     logging.info("* Reading raw data and decompose into paragraphs")
 
-    contx_processor = ContextProcessor()
-    contx_processor.trigger_process_contx()
+    # contx_processor = ContextProcessor()
+    # contx_processor.trigger_process_contx()
 
     entry_processor = EntryProcessor()
+    entry_processor.trigger_process_entries()

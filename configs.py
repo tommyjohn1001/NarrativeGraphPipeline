@@ -40,7 +40,7 @@ args.d_embd             = 200
 args.d_hid              = 64
 args.max_len_ans        = 12        # maximum inferring steps of decoder
 args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
-args.d_vocab            = 27156     # Vocab size
+args.d_vocab            = 32715     # Vocab size
 args.dropout            = 0.15
 args.n_layers           = 5
 
@@ -62,6 +62,7 @@ PATH    = {
     ],
     'bert'              : [
         "/root/bert-base-uncased",
+        "/home/ubuntu/bert-base-uncased",
         "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased",
         "/home/tommy/Projects/_pretrained/BERT/bert-base-uncased"
     ],

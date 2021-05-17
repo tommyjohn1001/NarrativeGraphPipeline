@@ -239,9 +239,9 @@ class Trainer():
         ###############################
         # Load data
         ###############################
-        dataset_train   = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "train"),
+        dataset_train   = CustomDataset(os.path.dirname(PATH['dataset']).replace("[SPLIT]", "train"),
                                        self.vocab)
-        dataset_test    = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "test"),
+        dataset_test    = CustomDataset(os.path.dirname(PATH['dataset']).replace("[SPLIT]", "test"),
                                        self.vocab)
 
 
@@ -307,7 +307,7 @@ class Trainer():
         ###############################
         # Load data
         ###############################
-        dataset_valid   = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "validation"),
+        dataset_valid   = CustomDataset(os.path.dirname(PATH['dataset']).replace("[SPLIT]", "valid"),
                                       self.vocab)
 
         ###############################
