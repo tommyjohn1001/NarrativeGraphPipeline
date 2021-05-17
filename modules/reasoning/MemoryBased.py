@@ -153,20 +153,22 @@ class Memory(torch_nn.Module):
         super().__init__()
 
         self.memory     = [None]*(args.n_paras)
-        self.attn_mask  = torch.rand((args.n_paras, 1, args.batch, 1),
-                                     device=args.device, requires_grad=True)
+        self.ones       = torch.ones((args.batch, args.n_paras), device=args.device)
 
         if check_exist(PATH['memory']):
             logging.info("Tensors of MemoryModule exist. Load them.")
 
-            backup  = torch.load(PATH['memory'], map_location="cuda:0")
-            self.memory     = backup['memory']
-            self.attn_mask  = backup['attn_memory']
+            self.memory = torch.load(PATH['memory'], map_location="cuda:0")
 
 
         self.linear1    = torch_nn.Linear(args.d_hid, args.d_hid, bias=False)
         self.linear2    = torch_nn.Linear(args.d_hid, args.d_hid, bias=False)
         self.linear_gate= torch_nn.Linear(args.d_hid, args.d_hid, bias=True)
+
+        self.attn_mask  = torch_nn.Sequential(
+            torch_nn.Linear(args.n_paras, args.n_paras, bias=False),
+            torch_nn.Softmax(dim=1)
+        )
 
 
     def forward(self, nth_para: int, ques_para: Tensor, output: Tensor):
@@ -195,24 +197,25 @@ class Memory(torch_nn.Module):
         self.forward(nth_para, ques_para, output)
 
     def get_final_memory(self):
-        attn_mask   = torch.softmax(self.attn_mask, dim=0)
+        attn_mask   = self.attn_mask(self.ones)
+        # [batch, n_paras]
+        attn_mask   = attn_mask.transpose(0, 1).view(args.n_paras, 1, args.batch, 1)
+        # [n_paras, 1, batch, 1]
         attn_mask   = attn_mask.repeat(1, args.seq_len_ques + args.seq_len_para, 1, args.d_hid)
-        # [n_paras, seq_len_ques + seq_len_para, b, d_hid]
+        # [n_paras, seq_len_ques + seq_len_para, batch, d_hid]
 
         memory_     = [t.unsqueeze(0) for t in self.memory]
         memory_     = torch.vstack(memory_)
-        # [n_paras, seq_len_ques + seq_len_para, b, d_hid]
+        # [n_paras, seq_len_ques + seq_len_para, batch, d_hid]
 
         return (memory_ * attn_mask).sum(dim=0)
+        # [seq_len_ques + seq_len_para, batch, d_hid]
 
     def get_mem_cell(self, nth_para):
         return self.memory[nth_para]
 
     def save_memory(self):
-        torch.save({
-            'memory'        : self.memory,
-            'attn_memory'   : self.attn_mask
-        }, PATH['memory'])
+        torch.save(self.memory, PATH['memory'])
 
 
 class MemoryBasedReasoning(torch_nn.Module):
@@ -277,15 +280,13 @@ class MemoryBasedReasoning(torch_nn.Module):
         Y.append(final[:, :b, :].unsqueeze(0))
         Y   = torch.cat(Y, dim=0).to(args.device).permute(0, 2, 1, 3)
         # [n_paras + 1, b, seq_len_ques + seq_len_para, d_hid]
-        print(f"Y: {Y.shape}")
+
         Y   = Y.reshape(n_paras + 1, b, -1)
         # [n_paras+1, b, (seq_len_ques + seq_len_para)*d_hid]
 
         Y   = self.linearY(Y)
         # [n_paras + 1, b, d_hid]
 
-
-        print(f"Y = {Y.shape}")
 
         return Y
 

@@ -2,6 +2,10 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 17 2021, 15:57
+- Attention mask in module *MemoryBased* is *Linear* module now instead of a tensor.
+- Fix error in module *DataReading*
+
 ## May 16 2021, 18:05
 - Modify paths in 'configs.py' to make them consistent and add checking existence with paths
 - Reimplement module 'DataReading'

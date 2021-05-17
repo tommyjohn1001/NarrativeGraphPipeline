@@ -240,10 +240,10 @@ class EntryProcessor():
 
         return {
             'doc_id'    : entry.document_id,
-            'question'  : ' '.join(entry.question_tokenized),
+            'question'  : entry.question_tokenized.lower(),
             'answers'   : [
-                ' '.join(entry.answer1_tokenized),
-                ' '.join(entry.answer2_tokenized)
+                entry.answer1_tokenized.lower(),
+                entry.answer2_tokenized.lower()
             ],
             'En'        : [paras[i] for i in golden_paras_answ],
             'Hn'        : [paras[i] for i in golden_paras_ques]
@@ -293,10 +293,10 @@ class EntryProcessor():
 
             queue.put({
                 'doc_id'    : entry.document_id,
-                'question'  : ' '.join(entry.question_tokenized),
+                'question'  : entry.question_tokenized.lower(),
                 'answers'   : [
-                    ' '.join(entry.answer1_tokenized),
-                    ' '.join(entry.answer2_tokenized)
+                    entry.answer1_tokenized.lower(),
+                    entry.answer2_tokenized.lower()
                 ],
                 'En'        : [paras[i] for i in golden_paras_answ],
                 'Hn'        : [paras[i] for i in golden_paras_ques]
@@ -324,11 +324,11 @@ class EntryProcessor():
 
 
                 # NOTE: This is for single processing
-                # list_documents  = [self.f_process_entry(entry)
-                #                    for entry in tqdm(documents.iloc[start_:end_].itertuples(), total=end_ - start_ )]
+                list_documents  = [self.f_process_entry(entry)
+                                   for entry in tqdm(documents.iloc[start_:end_].itertuples(), total=end_ - start_ )]
                 # NOTE: This is for multi processing
-                list_documents  = ParallelHelper(self.f_process_entry2, documents.iloc[start_:end_],
-                                                 lambda d, l, h: d.iloc[l:h], args.num_proc).launch()
+                # list_documents  = ParallelHelper(self.f_process_entry2, documents.iloc[start_:end_],
+                #                                  lambda d, l, h: d.iloc[l:h], args.num_proc).launch()
 
                 save_object(path, pd.DataFrame(list_documents))
 

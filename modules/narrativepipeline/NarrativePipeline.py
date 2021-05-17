@@ -41,7 +41,7 @@ class  NarrativePipeline(torch_nn.Module):
         # paras : [b, n_paras, seq_len_para, d_hid]
         # ans   : [b, seq_len_ans, d_hid]
 
-        print("Finish 1")
+        # print("Finish 1")
 
         ####################
         # Do reasoning with IAL
@@ -49,13 +49,15 @@ class  NarrativePipeline(torch_nn.Module):
         Y       = self.reasoning(ques, paras)
         # Y: [n_paras + 1, b, d_hid]
 
-        print("Finish 2")
+        # print("Finish 2")
 
         ####################
         # Generate answer with PGD
         ####################
         pred    = self.ans_infer(Y, ans, is_inferring)
         # pred: [b, seq_len_ans, d_vocab]
+
+        # print("Finish 3")
 
         return pred
 
@@ -143,13 +145,13 @@ class Trainer():
             for batch in iterator_train:
                 pred_result = []
 
-                ques        = batch['ques'].to(args.device)
+                ques        = batch['ques'].to(args.device).float()
                 ques_mask   = batch['ques_mask'].to(args.device)
-                ans1        = batch['ans1'].to(args.device)
+                ans1        = batch['ans1'].to(args.device).float()
                 ans1_mask   = batch['ans1_mask'].to(args.device)
                 ans1_ids    = batch['ans1_ids']
                 ans2_ids    = batch['ans2_ids']
-                paras       = batch['paras'].to(args.device)
+                paras       = batch['paras'].to(args.device).float()
                 paras_mask  = batch['paras_mask'].to(args.device)
 
                 optimizer.zero_grad()
@@ -158,12 +160,14 @@ class Trainer():
                                     paras, paras_mask, is_inferring=False)
 
 
-
-                for pred_, ans1_, ans2_ in zip(pred, ans1_ids, ans2_ids):
+                # This piece of code is to show tokens of pred during training
+                _, indices = torch.softmax(pred, dim=2).topk(k=1, dim=2)
+                indices = indices.squeeze(2)
+                for pred_, ans1_, ans2_ in zip(indices, ans1_ids, ans2_ids):
                     pred_result.append({
-                        'pred': ' '.join(self.vocab.itos(pred_)),
-                        'ans1': ' '.join(self.vocab.itos(ans1_)),
-                        'ans2': ' '.join(self.vocab.itos(ans2_))
+                        'pred': ' '.join(self.vocab.itos(pred_.tolist())),
+                        'ans1': ' '.join(self.vocab.itos(ans1_.tolist())),
+                        'ans2': ' '.join(self.vocab.itos(ans2_.tolist()))
                     })
 
                 with open("backup/pred_train.json", 'a+') as result_file:
@@ -248,7 +252,7 @@ class Trainer():
         ###############################
         # Defind model and associated stuffs
         ###############################
-        model       = NarrativePipeline(self.vocab).to(args.device)
+        model       = NarrativePipeline(self.vocab).to(args.device).float()
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay, eps=1e-6)
         scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=0)
 
@@ -313,7 +317,7 @@ class Trainer():
         ###############################
         # Defind model and associated stuffs
         ###############################
-        model       = NarrativePipeline(self.vocab).to(args.device).to(args.device)
+        model       = NarrativePipeline(self.vocab).to(args.device).to(args.device).float()
         model       = self.load_model(model)
 
         ###############################
@@ -344,9 +348,9 @@ class Trainer():
                                         paras, paras_mask, is_inferring=True)
                     for pred_, ans1_, ans2_ in zip(pred, ans1_ids, ans2_ids):
                         pred_result.append({
-                            'pred': ' '.join(self.vocab.itos(pred_)),
-                            'ans1': ' '.join(self.vocab.itos(ans1_)),
-                            'ans2': ' '.join(self.vocab.itos(ans2_))
+                            'pred': ' '.join(self.vocab.itos(pred_.tolist())),
+                            'ans1': ' '.join(self.vocab.itos(ans1_.tolist())),
+                            'ans2': ' '.join(self.vocab.itos(ans2_.tolist()))
                         })
 
                     with open(PATH['prediction'], 'a+') as result_file:

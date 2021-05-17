@@ -172,24 +172,13 @@ class CustomDataset(Dataset):
 
         return sent_, sent_mask_, np.array(sent_ids_, dtype=np.int)
 
-    def process_ans_loss(self, sent:str, max_len: int):
-        sent_       = sent.lower().split(' ')
-
-        sent_       = self.vocab.stoi(sent_)
-
-        pad_tok_id  = self.nlp_bert.pad_token_id
-
-        sent_len_   = len(sent_)
-        sent_       = np.array(sent_ + [pad_tok_id]*(max_len - sent_len_), dtype=np.int)
-
-        return sent_
-
     def f_process_file(self, entries, queue, arg):
         for entry in entries.itertuples():
             ###########################
             # Process question
             ###########################
             ques, ques_mask, _  = self.process_sent(entry.question, args.seq_len_ques)
+            ques    = np.vstack(ques)
 
 
             ###########################
@@ -203,6 +192,8 @@ class CustomDataset(Dataset):
 
             ans1, ans1_mask, ans1_ids   = self.process_sent(answers[0], args.seq_len_ans)
             ans2, _, ans2_ids           = self.process_sent(answers[0], args.seq_len_ans)
+            ans1    = np.vstack(ans1)
+            ans2    = np.vstack(ans2)
 
 
             ###########################
@@ -219,6 +210,12 @@ class CustomDataset(Dataset):
                 sent, sent_mask, _ = self.process_sent(sent, args.seq_len_para)
                 paras.append(np.expand_dims(sent, axis=0))
                 paras_mask.append(np.expand_dims(sent_mask, axis=0))
+
+            # This piece of code pads zero tensor to 'paras' and 'paras_mask'
+            # in case no. paras is less than args.n_paras
+            for _ in range(args.n_paras - len(paras)):
+                paras.append(np.zeros((1, args.seq_len_para, args.d_embd)))
+                paras_mask.append(np.zeros((1, args.seq_len_para)))
 
             paras       = np.vstack(paras)
             paras_mask  = np.vstack(paras_mask)
