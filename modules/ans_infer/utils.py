@@ -1,10 +1,10 @@
+
 import re
 
 import torch.nn as torch_nn
 import torch
 
 from modules.utils import transpose
-
 
 class AttentivePooling(torch_nn.Module):
     def __init__(self, dim):
@@ -69,13 +69,13 @@ class BeamSearch():
         beam_size : int = 10,
         max_len : int = 12,
         model = None,
-        init_tok: int = 0,
+        init_tok: int = 1,
         stop_tok: int = 2,
         no_repeat_ngram_size: int = 5,
         early_stop: bool = False,
         topk_strategy: str = "topk",
         threshold = 0.65):
-        self.beam_size      = beam_size
+
         self.max_len        = max_len
         self.model          = model
         self.max_len        = max_len
@@ -85,6 +85,11 @@ class BeamSearch():
         self.ngram_nonrepeat= no_repeat_ngram_size
         self.topk_strategy  = topk_strategy
         self.threshold      = threshold
+
+        if self.topk_strategy == "select_nucleus_sample_nobeam":
+            self.beam_size      = 1
+        else:
+            self.beam_size      = beam_size
 
 
     def search(self, Y: torch.Tensor):
@@ -97,8 +102,11 @@ class BeamSearch():
 
         queue  = CustomPriorityQueue(self.beam_size, self.init_tok, "min")
 
-        for _ in range(self.max_len):
-            for _ in range(self.beam_size):
+        for length in range(self.max_len):
+            # print(f"Length: {length}")
+            for beamth in range(self.beam_size):
+                # print(f"Beamth: {beamth}")
+
                 #################################
                 # Pop from queue and put into model
                 #################################
@@ -145,9 +153,17 @@ class BeamSearch():
                 if self.topk_strategy == "topk":
                     distribution        = torch.log_softmax(output, dim=0)
                     topk_dist, topk_tok = self.select_topk(distribution)
-                elif self.topk_strategy == "nucleus_sample":
+                elif self.topk_strategy == "select_nucleus_sample":
                     distribution        = torch.softmax(output, dim=0)
                     topk_dist, topk_tok = self.select_nucleus_sample(distribution)
+                elif self.topk_strategy == "select_nucleus_sample_nobeam":
+                    distribution        = torch.softmax(output, dim=0)
+                    topk_dist, topk_tok = self.select_nucleus_sample_nobeam(distribution)
+                elif self.topk_strategy == "select_mix_beam":
+                    distribution        = torch.softmax(output, dim=0)
+                    topk_dist, topk_tok = self.select_mix_beam(distribution)
+                else:
+                    raise TypeError
                 # topk_dist, topk_tok: [beam_size]
 
                 # for each dis and token in top-k, create new beam
@@ -235,5 +251,56 @@ class BeamSearch():
         ##########################
         topBeam_dist, topBeam_tok = torch.topk(topK_dist, self.beam_size, 0)
 
+
+        return topBeam_dist, topBeam_tok
+
+    def select_nucleus_sample_nobeam(self, distribution):
+
+        ##########################
+        # Select topP using Nucleus sampling
+        ##########################
+        sorted_val, indices = torch.sort(distribution, dim=0, descending=True)
+
+        accum = 0
+        for i, val in enumerate(sorted_val):
+            if accum <= self.threshold <= accum + val:
+                break
+            accum += val
+
+        topP_tok    = indices[:i + 1]
+        topP_dist   = torch.index_select(distribution, dim=0, index=topP_tok) / accum
+
+
+        ##########################
+        # Randomly select topK
+        ##########################
+
+
+
+        r = torch.rand((1,)).item()
+        accum = 0
+        for tok, culmulative in zip(topP_tok, topP_dist):
+            if accum <= r <= accum + culmulative:
+                break
+            accum += culmulative
+        topBeam_tok     = [tok]
+        topBeam_dist    = torch.log(torch.FloatTensor((culmulative, )))
+
+        return topBeam_dist, topBeam_tok
+
+    def select_mix_beam(self, distribution):
+        temperature     = 1.1
+
+        top_dist, top_tok = torch.topk(distribution, 10000, 0)
+
+        top_dist = top_dist / top_dist.sum(dim=0) / temperature
+
+        topBeam_dist, topBeam_tok = torch.topk(top_dist, self.beam_size, 0)
+        topBeam_tok = top_tok[topBeam_tok]
+        topBeam_dist= torch.log_softmax(topBeam_dist, dim=0)
+
+        # indx = torch.randint(0, 1000, (1,))
+        # topBeam_dist = torch.log(top_dist[indx])
+        # topBeam_tok  = top_tok[indx]
 
         return topBeam_dist, topBeam_tok

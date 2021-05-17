@@ -96,19 +96,17 @@ class CustomDataset(Dataset):
         self.file_names = glob.glob(f"{path_csv_dir}/data_*.csv")
 
         self.nlp_spacy  = spacy.load("en_core_web_sm")
-        self.nlp_bert   = BertTokenizer.from_pretrained(args.bert_model)
+        self.nlp_bert   = BertTokenizer.from_pretrained(PATH['bert'])
 
         self.vocab      = Vocab(PATH['vocab'])
 
 
         self.ques           = None
         self.ques_mask      = None
-        self.ans1           = None  # in token ID form, not embedded form
-        self.ans2           = None  # in token ID form, not embedded form
-        self.ans1_mask      = None
-        self.ans1_loss      = None
-        self.ans1_plain     = None
-        self.ans2_plain     = None
+        self.ans1_bert_ids  = None  # in token ID form, not embedded form
+        self.ans1_bert_mask = None
+        self.ans1_vocab_ids = None
+        self.ans2_vocab_ids = None
         self.paras          = None
         self.paras_len      = None  # this is no. nodes (paras)
         self.paras_mask     = None
@@ -128,16 +126,13 @@ class CustomDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-
         return {
             'ques'          : self.ques[idx],
             'ques_mask'     : self.ques_mask[idx],
-            'ans1'          : self.ans1[idx],
-            'ans2'          : self.ans2[idx],
-            'ans1_mask'     : self.ans1_mask[idx],
-            'ans1_loss'     : self.ans1_loss[idx],
-            'ans1_plain'    : self.ans1_plain[idx],
-            'ans2_plain'    : self.ans2_plain[idx],
+            'ans1_bert_ids' : self.ans1_bert_ids[idx],
+            'ans1_bert_mask': self.ans1_bert_mask[idx],
+            'ans1_vocab_ids': self.ans1_vocab_ids[idx],
+            'ans2_vocab_ids': self.ans2_vocab_ids[idx],
             'paras'         : self.paras[idx],
             'paras_len'     : self.paras_len[idx],
             'paras_mask'    : self.paras_mask[idx],
@@ -149,7 +144,7 @@ class CustomDataset(Dataset):
     ###########################################
     # USER-DEFINED METHOD
     ###########################################
-    def process_sent(self, sent:str, max_len: int) -> tuple:
+    def process_sent(self, sent:str, max_len: int, nlp: str = 'bert') -> tuple:
         """Process sentence (question, a sentence in context or answer).
 
         Args:
@@ -162,31 +157,28 @@ class CustomDataset(Dataset):
 
         sent_       = sent.lower().split(' ')
 
-        sent_       = self.nlp_bert.convert_tokens_to_ids(sent_)
+        if nlp == "bert":
+            sent_       = self.nlp_bert.convert_tokens_to_ids(sent_)
 
-        cls_tok_id  = self.nlp_bert.cls_token_id
-        sep_tok_id  = self.nlp_bert.sep_token_id
-        pad_tok_id  = self.nlp_bert.pad_token_id
+            cls_tok_id  = self.nlp_bert.cls_token_id
+            sep_tok_id  = self.nlp_bert.sep_token_id
+            pad_tok_id  = self.nlp_bert.pad_token_id
+        elif nlp == 'vocab':
+            sent_       = self.vocab.stoi(sent_)
 
-        sent_       = [cls_tok_id] + sent_[:max_len-2] + [sep_tok_id]
+            cls_tok_id  = self.vocab.cls_id
+            sep_tok_id  = self.vocab.sep_id
+            pad_tok_id  = self.vocab.pad_id
+        else:
+            raise TypeError("'nlp' not correct.")
+
+        sent_       = [cls_tok_id] + sent_ + [sep_tok_id]
 
         sent_len_   = len(sent_)
         sent_mask_  = np.array([1]*sent_len_ + [0]*(max_len - sent_len_), dtype=np.float)
         sent_       = np.array(sent_ + [pad_tok_id]*(max_len - sent_len_), dtype=np.int)
 
         return sent_, np.array(sent_len_), sent_mask_
-
-    def process_ans_loss(self, sent:str, max_len: int):
-        sent_       = sent.lower().split(' ')
-
-        sent_       = self.vocab.stoi(sent_)
-
-        pad_tok_id  = self.nlp_bert.pad_token_id
-
-        sent_len_   = len(sent_)
-        sent_       = np.array(sent_ + [pad_tok_id]*(max_len - sent_len_), dtype=np.int)
-
-        return sent_
 
     def construct_edge_indx(self, paras: list, question: str) -> tuple:
         """Construct graph edges' index using raw question and paras
@@ -260,9 +252,9 @@ class CustomDataset(Dataset):
             if len(ans1) < len(ans2):
                 answers[0], answers[1] = answers[1], answers[0]
 
-            ans1, _, ans1_mask  = self.process_sent(answers[0], args.seq_len_ans)
-            ans2, _, _          = self.process_sent(answers[1], args.seq_len_ans)
-            ans1_loss           = self.process_ans_loss(answers[0], args.seq_len_ans)
+            ans1_bert_ids, _, ans1_bert_mask    = self.process_sent(answers[0], args.seq_len_ans)
+            ans1_vocab_ids, _, _                = self.process_sent(answers[0], args.seq_len_ans, 'vocab')
+            ans2_vocab_ids, _, _                = self.process_sent(answers[1], args.seq_len_ans, 'vocab')
 
 
             ###########################
@@ -303,12 +295,10 @@ class CustomDataset(Dataset):
             queue.put({
                 'ques'          : ques,
                 'ques_mask'     : ques_mask,
-                'ans1'          : ans1,
-                'ans2'          : ans2,
-                'ans1_mask'     : ans1_mask,
-                'ans1_loss'     : ans1_loss,
-                'ans1_plain'    : answers[0],
-                'ans2_plain'    : answers[1],
+                'ans1_bert_ids' : ans1_bert_ids,
+                'ans1_bert_mask': ans1_bert_mask,
+                'ans1_vocab_ids': ans1_vocab_ids,
+                'ans2_vocab_ids': ans2_vocab_ids,
                 'paras'         : paras,
                 'paras_len'     : paras_len,
                 'paras_mask'    : paras_mask,
@@ -322,12 +312,10 @@ class CustomDataset(Dataset):
 
         self.ques           = []
         self.ques_mask      = []
-        self.ans1           = []
-        self.ans2           = []
-        self.ans1_mask      = []
-        self.ans1_loss      = []
-        self.ans1_plain     = []
-        self.ans2_plain     = []
+        self.ans1_bert_ids  = []
+        self.ans1_bert_mask = []
+        self.ans1_vocab_ids = []
+        self.ans2_vocab_ids = []
         self.paras          = []
         self.paras_len      = []
         self.paras_mask     = []
@@ -346,15 +334,13 @@ class CustomDataset(Dataset):
         for entry in entries:
             self.ques.append(entry['ques'])
             self.ques_mask.append(entry['ques_mask'])
+            self.ans1_bert_ids.append(entry['ans1_bert_ids'])
+            self.ans1_bert_mask.append(entry['ans1_bert_mask'])
+            self.ans1_vocab_ids.append(entry['ans1_vocab_ids'])
+            self.ans2_vocab_ids.append(entry['ans2_vocab_ids'])
             self.paras.append(entry['paras'])
             self.paras_len.append(entry['paras_len'])
             self.paras_mask.append(entry['paras_mask'])
-            self.ans1.append(entry['ans1'])
-            self.ans2.append(entry['ans2'])
-            self.ans1_mask.append(entry['ans1_mask'])
-            self.ans1_loss.append(entry['ans1_loss'])
-            self.ans1_plain.append(entry['ans1_plain'])
-            self.ans2_plain.append(entry['ans2_plain'])
             self.edge_indx.append(entry['edge_indx'])
             self.edge_len.append(entry['edge_len'])
 
@@ -364,29 +350,25 @@ class CustomDataset(Dataset):
 
 
 def build_vocab():
-    """ Build vocab for Decoder. """
+    """ Build vocab for Inferring answer module. """
     log = logging.getLogger("spacy")
     log.setLevel(logging.ERROR)
 
     nlp_            = spacy.load("en_core_web_sm", disable=['ner', 'parser', 'tagger'])
-    nlp_.max_length  = 2500000
 
 
     word_count      = defaultdict(int)
 
-    answer_toks     = set()
+    ques_answer_toks= set()
 
 
-    # Read stories in train, test, valid set
-    for split in ["train", "test", "validation"]:
-        logging.info(f"Process split: {split}")
-
-        path    = PATH['processed_contx'].replace("[SPLIT]", split)
+    # Read processed contexts
+    paths    = glob.glob(PATH['processed_contx'].replace("[ID]", "*"))
+    for path in tqdm(paths, desc="Get context"):
         with open(path, 'r') as d_file:
-            contexts    = json.load(d_file)
+            context    = json.load(d_file)
 
-        # Add tokens in context to global vocab
-        for context in tqdm(contexts.values(), desc="Get context"):
+            # Add tokens in context to global vocab
             for para in context:
                 for tok in nlp_(para):
                     if  not tok.is_punct and\
@@ -394,12 +376,15 @@ def build_vocab():
                         not tok.like_url:
                         word_count[tok.text] += 1
 
-        # Add tokens in answer1 and answer2 to global vocab
-        dataset = load_dataset("narrativeqa", split=split)
-        for entry in tqdm(dataset, total=len(dataset), desc="Get answers"):
-            for tok in entry['answers'][0]['tokens'] + entry['answers'][1]['tokens']:
-                answer_toks.add(tok.lower())
+    # Add tokens in ans1 ans2, question to global vocab
+    documents   = pd.read_csv(f"{PATH['raw_data_dir']}/qaps.csv", header=0, index_col=None)
+    for entry in tqdm(documents.itertuples(), total=len(documents), desc="Get question and answers"):
+        ques    = entry.question_tokenized.lower().split(' ')
+        ans1    = entry.answer1_tokenized.lower().split(' ')
+        ans2    = entry.answer2_tokenized.lower().split(' ')
 
+        for tok in ques + ans1 + ans2:
+            ques_answer_toks.add(tok)
 
     # Sort word_count dict and filter top 1000 words
     words = sorted(word_count.items(), key=lambda item: item[1], reverse=True)
@@ -407,12 +392,14 @@ def build_vocab():
 
     # words = set(w for w, occurence in word_count.items() if occurence >= args.min_count_PGD)
 
-    words = words.union(answer_toks)
+    words = words.union(ques_answer_toks)
 
     # Write vocab to TXT file
     with open(PATH['vocab'], 'w+') as vocab_file:
         for word in ["[pad]", "[cls]", "[sep]", "[unk]"]:
             vocab_file.write(word + '\n')
 
+    # Write vocab to TXT file
+    with open(PATH['vocab'], 'w+') as vocab_file:
         for word in words:
             vocab_file.write(word + '\n')

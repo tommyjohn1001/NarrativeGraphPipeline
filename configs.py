@@ -34,23 +34,16 @@ args.device     = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 ## other args
 args.multi_gpus = torch.cuda.device_count() > 0
 
-path_bert   = "/root/bert-base-uncased/"
-if os.path.isdir(path_bert):
-    args.bert_model         = path_bert
-else:
-    args.bert_model         = "bert-base-uncased"
-
-args.seq_len_ques       = 40
-args.seq_len_dataprocess= 50
-args.seq_len_para       = 52        # max len of each para of context after DataReading
-args.seq_len_ans        = 40        # maximum answer length of dataset
-args.n_paras            = 40
+args.seq_len_ques       = 40  + 2   # The reason why sequence length of ques, contx and ans
+args.seq_len_para       = 120 + 2   # plus 2 is for CLS and SEP token
+args.seq_len_ans        = 40  + 2   # maximum answer length of dataset
+args.n_paras            = 30
 args.d_embd             = 200
-args.d_hid              = 256
+args.d_hid              = 64
 args.max_len_ans        = 12        # maximum inferring steps of decoder
 args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
-args.d_vocab            = 27156     # Vocab size
-args.dropout            = 0.2
+args.d_vocab            = 32715     # Vocab size
+args.dropout            = 0.15
 args.n_layers           = 5
 
 args.graph_d_project    = 2048
@@ -64,6 +57,13 @@ args.n_gram_beam        = 5
 # Config path of backup files
 ###############################
 PATH    = {
+    'bert'              : [
+        "/root/bert-base-uncased",
+        "/home/ubuntu/bert-base-uncased",
+        "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased",
+        "/home/tommy/Projects/_pretrained/BERT/bert-base-uncased"
+    ],
+
     ## Paths associated with Data Reading
     'dataset_para'      : "backup/[SPLIT]/data_[SHARD].csv",
     'processed_contx'   : "backup/proc_contx_[SPLIT].json",
@@ -74,6 +74,16 @@ PATH    = {
     'log'               : "run.log"
 }
 
+for key, val in PATH.items():
+    if isinstance(val, list):
+        is_found = False
+        for path in val:
+            if os.path.isdir(path):
+                is_found  = True
+                PATH[key] = path
+                break
+        if not is_found:
+            raise FileNotFoundError(f"{key} not found")
 
 ###############################
 # Config logging

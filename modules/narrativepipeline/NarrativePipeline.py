@@ -2,7 +2,6 @@ import os, json
 from typing import List
 
 from torch.utils.data import DataLoader
-import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 from transformers import AdamW
@@ -10,7 +9,7 @@ from transformers import AdamW
 
 from modules.narrativepipeline.utils import CustomDataset, build_vocab, Vocab
 from modules.ans_infer.Transformer import TransDecoder
-from modules.utils import check_exist, get_scores
+from modules.utils import check_exist
 from modules.Reasoning.GraphReasoning import GraphReasoning
 from modules.finegrained.BertEmbedding import SimpleBertEmbd
 from configs import args, logging, PATH
@@ -26,15 +25,15 @@ class  NarrativePipeline(torch_nn.Module):
     def forward(self, ques, ques_mask, ans, ans_mask,
                 paras, paras_len, paras_mask, edge_indx,
                 edge_len, is_inferring=False):
-        # ques      : [b, seq_len_ques]
-        # ques_mask : [b, seq_len_ques]
-        # paras     : [b, n_paras, seq_len_para]
-        # paras_len : [b]
-        # paras_mask: [b, n_paras, seq_len_para]
-        # ans       : [b, seq_len_ans]
-        # ans_mask  : [b, seq_len_ans]
-        # edge_indx : [b, 2, n_edges]
-        # edge_len  : [b]
+        # ques           : [b, seq_len_ques]
+        # ques_mask      : [b, seq_len_ques]
+        # ans1_bert_ids  : [b, seq_len_ans]
+        # ans1_bert_mask : [b, seq_len_ans]
+        # paras          : [b, n_paras, seq_len_para]
+        # paras_len      : [b]
+        # paras_mask     : [b, n_paras, seq_len_para]
+        # edge_indx      : [b, 2, n_edges]
+        # edge_len       : [b]
 
         batch   = ques.shape[0]
 
@@ -42,12 +41,11 @@ class  NarrativePipeline(torch_nn.Module):
         # Embed question, paras and answer
         # with BERT
         ####################
-        ques_embd, ques_seq_embd, para_embd, ans_seq_embd = \
+        ques_embd, para_embd, ans_seq_embd = \
             self.embd_layer(ques, ques_mask, paras, paras_mask, ans, ans_mask)
         # ques_embd     : [b, 768]
-        # ques_seq_embd : [b, seq_len_ques, 768]
         # paras_seq_embd: [b, n_paras, 768]
-        # ans_seq_embd  : [b, seq_len_ans, 768]
+        # ans_seq_embd  : [b, seq_len_ans, 768] or None
 
         ####################
         # Do reasoning with IAL
@@ -154,31 +152,35 @@ class Trainer():
             iterator_train  = DataLoader(dataset_train, batch_size=args.batch, shuffle=True)
 
             for batch in iterator_train:
-                ques        = batch['ques'].to(args.device)
-                ques_mask   = batch['ques_mask'].to(args.device)
-                paras       = batch['paras'].to(args.device)
-                paras_len   = batch['paras_len'].to(args.device)
-                paras_mask  = batch['paras_mask'].to(args.device)
-                ans1        = batch['ans1'].to(args.device)
-                ans1_mask   = batch['ans1_mask'].to(args.device)
-                ans1_loss   = batch['ans1_loss'].to(args.device)
-                edge_indx   = batch['edge_indx'].to(args.device)
-                edge_len    = batch['edge_len'].to(args.device)
+                ques            = batch['ques'].to(args.device)
+                ques_mask       = batch['ques_mask'].to(args.device)
+                ans1_bert_ids   = batch['ans1_bert_ids'].to(args.device)
+                ans1_bert_mask  = batch['ans1_bert_mask'].to(args.device)
+                ans1_vocab_ids  = batch['ans1_vocab_ids'].to(args.device)
+                ans2_vocab_ids  = batch['ans2_vocab_ids'].to(args.device)
+                paras           = batch['paras'].to(args.device)
+                paras_len       = batch['paras_len'].to(args.device)
+                paras_mask      = batch['paras_mask'].to(args.device)
+                edge_indx       = batch['edge_indx'].to(args.device)
+                edge_len        = batch['edge_len'].to(args.device)
+
 
                 optimizer.zero_grad()
 
-                pred        = model(ques, ques_mask, ans1, ans1_mask,
+                pred        = model(ques, ques_mask, ans1_bert_ids, ans1_bert_mask,
                                     paras, paras_len, paras_mask, edge_indx,
                                     edge_len, is_inferring=False)
                 # pred: [batch, seq_len_ans, d_vocab]
                 pred_flat   = pred.view(-1, args.d_vocab)
-                ans1_loss   = ans1_loss.view(-1)
+                ans1_flat   = ans1_vocab_ids.view(-1)
+                ans2_flat   = ans2_vocab_ids.view(-1)
 
+                loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
+                              0.3 * criterion(pred_flat, ans2_flat)
 
-                loss        = criterion(pred_flat, ans1_loss)
 
                 loss.backward()
-                torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=0.25)
+                torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1)
                 optimizer.step()
                 scheduler.step()
 
@@ -192,8 +194,7 @@ class Trainer():
 
     def test(self, model, dataset_test, criterion):
         nth_batch, n_samples            = 0, 0
-        loss_test                       = 0
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
+        loss_test                       = 0        
 
         model.eval()
 
@@ -206,25 +207,28 @@ class Trainer():
                 n_samples   += len(dataset_test)
 
                 for batch in iterator_test:
-                    ques        = batch['ques'].to(args.device)
-                    ques_mask   = batch['ques_mask'].to(args.device)
-                    paras       = batch['paras'].to(args.device)
-                    paras_len   = batch['paras_len'].to(args.device)
-                    paras_mask  = batch['paras_mask'].to(args.device)
-                    ans1        = batch['ans1'].to(args.device)
-                    ans1_loss   = batch['ans1_loss'].to(args.device)
-                    ans1_mask   = batch['ans1_mask'].to(args.device)
-                    edge_indx   = batch['edge_indx'].to(args.device)
-                    edge_len    = batch['edge_len'].to(args.device)
+                    ques            = batch['ques'].to(args.device)
+                    ques_mask       = batch['ques_mask'].to(args.device)
+                    ans1_bert_ids   = batch['ans1_bert_ids'].to(args.device)
+                    ans1_bert_mask  = batch['ans1_bert_mask'].to(args.device)
+                    ans1_vocab_ids  = batch['ans1_vocab_ids'].to(args.device)
+                    ans2_vocab_ids  = batch['ans2_vocab_ids'].to(args.device)
+                    paras           = batch['paras'].to(args.device)
+                    paras_len       = batch['paras_len'].to(args.device)
+                    paras_mask      = batch['paras_mask'].to(args.device)
+                    edge_indx       = batch['edge_indx'].to(args.device)
+                    edge_len        = batch['edge_len'].to(args.device)
 
-                    pred        = model(ques, ques_mask, ans1, ans1_mask,
-                                        paras, paras_len, paras_mask, edge_indx,
-                                        edge_len, is_inferring=False)
+                    pred            = model(ques, ques_mask, ans1_bert_ids, ans1_bert_mask,
+                                            paras, paras_len, paras_mask, edge_indx,
+                                            edge_len, is_inferring=False)
                     # pred: [batch, seq_len_ans, d_vocab]
                     pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_loss   = ans1_loss.view(-1)
+                    ans1_flat   = ans1_vocab_ids.view(-1)
+                    ans2_flat   = ans2_vocab_ids.view(-1)
 
-                    loss        = criterion(pred_flat, ans1_loss)
+                    loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
+                                0.3 * criterion(pred_flat, ans2_flat)
 
                     loss_test += loss.detach().item()
 
@@ -292,36 +296,6 @@ class Trainer():
             self.save_checkpoint(model, optimizer, scheduler, nth_epoch, best_loss_test)
 
 
-    def get_batch_scores(self, pred, ans1_tok_idx, ans2_tok_idx) -> tuple:
-        """Calculate BLEU-1, BLEU4, METEOR and ROUGE_L for each entry in batch.
-
-        Args:
-            pred (tensor): predicted tensor
-            ans_tok_idx (tensor): target answer
-        """
-        # pred: [batch, d_vocab + seq_len_cntx, seq_len_ans]
-        # ans_tok_idx: [batch, seq_len_ans]
-
-        pred_   = torch.argmax(torch_f.log_softmax(pred, 1), 1)
-        # pred_: [batch, seq_len_ans]
-
-        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
-        # Calculate for each batch
-        for p, a1, a2 in zip(pred_.tolist(), ans1_tok_idx.tolist(), ans2_tok_idx.tolist()):
-            p  = ' '.join([self.vocab.itos(i) for i in p  if i > 0])
-            a1 = ' '.join([self.vocab.itos(i) for i in a1 if i > 0])
-            a2 = ' '.join([self.vocab.itos(i) for i in a2 if i > 0])
-
-            bleu_1_, bleu_4_, meteor_, rouge_l_ = get_scores([a1, a2], p)
-
-            bleu_1  += bleu_1_
-            bleu_4  += bleu_4_
-            meteor  += meteor_
-            rouge_l += rouge_l_
-
-        return bleu_1, bleu_4, meteor, rouge_l
-
-
     def clean_sent(self, sent: List[int]):
         sent_ = []
         for tok in sent:
@@ -358,32 +332,31 @@ class Trainer():
 
                 iterator_valid  = DataLoader(dataset_valid, batch_size=args.batch)
                 for batch in iterator_valid:
-                    ques        = batch['ques'].to(args.device)
-                    ques_mask   = batch['ques_mask'].to(args.device)
-                    paras       = batch['paras'].to(args.device)
-                    paras_len   = batch['paras_len'].to(args.device)
-                    paras_mask  = batch['paras_mask'].to(args.device)
-                    ans1        = batch['ans1'].to(args.device)
-                    ans1_mask   = batch['ans1_mask'].to(args.device)
-                    edge_indx   = batch['edge_indx'].to(args.device)
-                    edge_len    = batch['edge_len'].to(args.device)
-                    ans1_plain  = batch['ans1_plain']
-                    ans2_plain  = batch['ans2_plain']
+                    ques            = batch['ques'].to(args.device)
+                    ques_mask       = batch['ques_mask'].to(args.device)
+                    ans1_bert_ids   = batch['ans1_bert_ids'].to(args.device)
+                    ans1_bert_mask  = batch['ans1_bert_mask'].to(args.device)
+                    ans1_vocab_ids  = batch['ans1_vocab_ids'].to(args.device)
+                    ans2_vocab_ids  = batch['ans2_vocab_ids'].to(args.device)
+                    paras           = batch['paras'].to(args.device)
+                    paras_len       = batch['paras_len'].to(args.device)
+                    paras_mask      = batch['paras_mask'].to(args.device)
+                    edge_indx       = batch['edge_indx'].to(args.device)
+                    edge_len        = batch['edge_len'].to(args.device)
 
-                    pred        = model(ques, ques_mask, ans1, ans1_mask,
-                                        paras, paras_len, paras_mask, edge_indx,
-                                        edge_len, is_inferring=True)
+                    pred            = model(ques, ques_mask, None, None,
+                                            paras, paras_len, paras_mask, edge_indx,
+                                            edge_len, is_inferring=True)
 
-                    for pred_, ans1_, ans2_ in zip(pred, ans1_plain, ans2_plain):
+                    for pred_, ans1_, ans2_ in zip(pred, ans1_vocab_ids, ans2_vocab_ids):
                         pred_result.append({
-                            'pred': self.clean_sent(pred_),
-                            'ans1': ans1_,
-                            'ans2': ans2_,
+                            'pred': ' '.join(self.vocab.itos(pred_.tolist())),
+                            'ans1': ' '.join(self.vocab.itos(ans1_.tolist())),
+                            'ans2': ' '.join(self.vocab.itos(ans2_.tolist()))
                         })
 
-                    break
-
-                break
+                    with open(PATH['prediction'], 'a+') as result_file:
+                        json.dump(pred_result, result_file, indent=2, ensure_ascii=False)
 
 
         with open(PATH['prediction'], 'w+') as result_file:

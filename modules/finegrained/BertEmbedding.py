@@ -1,8 +1,9 @@
 
 from transformers import BertModel
 import torch.nn as torch_nn
+import torch
 
-from configs import args
+from configs import PATH, args
 
 
 class BertEmbedding(torch_nn.Module):
@@ -10,7 +11,7 @@ class BertEmbedding(torch_nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.embedding  = BertModel.from_pretrained(args.bert_model)
+        self.embedding  = BertModel.from_pretrained(PATH['bert'])
         for param in self.embedding.parameters():
             param.requires_grad = False
 
@@ -30,7 +31,11 @@ class SimpleBertEmbd(torch_nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.embedding  = BertEmbedding()
+        self.embedding      = BertEmbedding()
+        self.attn_mask_ques = torch_nn.Linear(args.seq_len_ques, args.seq_len_ques)
+        self.attn_mask_paras= torch_nn.Linear(args.n_paras, args.n_paras)
+
+        self.temperature    = 1.2
 
     def forward(self, ques, ques_mask, paras, paras_mask, ans, ans_mask):
         # ques          : [b, seq_len_ques]
@@ -45,9 +50,17 @@ class SimpleBertEmbd(torch_nn.Module):
         ###################
         # Embed question
         ###################
-        ques_embd, ques_seq_embd = self.embedding(ques, ques_mask)
-        # ques_embd     : [b, 768]
+        _, ques_seq_embd = self.embedding(ques, ques_mask)
         # ques_seq_embd : [b, seq_len_ques, 768]
+
+        ones        = torch.ones(b, args.seq_len_ques)
+        attn_mask1  = torch.softmax(self.attn_mask_ques(ones), dim=1)
+        # [b, seq_len_ques]
+
+        # Apply attention mask for question
+        attn_mask1  = attn_mask1.unsqueeze(2).repeat(1, 1, 768)
+        ques_embd   = (ques_seq_embd * attn_mask1).sum(1)
+        # [b, 768]
 
 
         ###################
@@ -65,10 +78,22 @@ class SimpleBertEmbd(torch_nn.Module):
         # [b, n_paras, 768]
 
 
+        # Dividing by temperature is a technique from topK temperature
+        # By dividing with temperature > 1, we decrease the variance of softmax distribution
+        attn_mask2  = torch.softmax(self.attn_mask_paras(ones)/self.temperature, dim=1)
+        attn_mask2  = attn_mask2.unsqueeze(2).repeat(1, 1, 768)
+        para_embd   = (para_embd * attn_mask2).sum(1)
+        # [b, n_paras, 768]
+
+
+
         ###################
         # Embed answer
         ###################
-        _, ans_seq_embd = self.embedding(ans, ans_mask)
-        # ans_seq_embd : [b, seq_len_ans, 768]
+        if ans:
+            _, ans_seq_embd = self.embedding(ans, ans_mask)
+            # ans_seq_embd : [b, seq_len_ans, 768]
+        else:
+            ans_seq_embd = None
 
-        return ques_embd, ques_seq_embd, para_embd, ans_seq_embd
+        return ques_embd, para_embd, ans_seq_embd

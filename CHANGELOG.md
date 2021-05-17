@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 17 2021, 21:24
+- Modify `configs.py` and fit it with data *version 3.0*
+- Modify module *NarrativePipeline*: fit with new field names
+- Modify `utils.py` of NarrativePipeline to fit with new field names, *data version 3*,...
+
+
 ## May 9 2021, 23:39
 - Reimplement *BeamSearch*: Replace *max_depth* and *max_breadth* by *beam_size*
 - Add **Nucleus Sampling** technique to *BeamSearch*

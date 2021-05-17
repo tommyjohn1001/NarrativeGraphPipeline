@@ -96,7 +96,7 @@ class TransDecoder(torch_nn.Module):
             pred        = []
             beam_search = BeamSearch(beam_size=args.beam_size, max_len=self.max_len_ans,
                                      model=infer, no_repeat_ngram_size=args.n_gram_beam,
-                                     topk_strategy="nucleus_sample")
+                                     topk_strategy="select_mix_beam")
 
             for b in range(batch):
                 indices = beam_search.search(Y[b, :, :])
@@ -121,19 +121,19 @@ class TransDecoder(torch_nn.Module):
             pred    = self.ff_pred(pred)
             # [b, seq_len_ans, d_vocab]
 
+            # NOTE: May 17: It doesnt know whether this masking step is effective, so I temporarily comment
+            # ########################
+            # # Multiply 'pred' with 2 masks
+            # ########################
+            # # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
+            # ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab).to(args.device)
+            # pred        = pred * ans_mask
+            # # pred: [b, seq_len_ans, d_vocab]
 
-            ########################
-            # Multiply 'pred' with 2 masks
-            ########################
-            # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
-            ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab).to(args.device)
-            pred        = pred * ans_mask
-            # pred: [b, seq_len_ans, d_vocab]
-
-            # Multiply 'pred' with mask SEP
-            sep_mask    = self.get_mask_sep(pred).to(args.device)
-            pred        = pred * sep_mask
-            # pred: [b, seq_len_ans, d_vocab]
+            # # Multiply 'pred' with mask SEP
+            # sep_mask    = self.get_mask_sep(pred).to(args.device)
+            # pred        = pred * sep_mask
+            # # pred: [b, seq_len_ans, d_vocab]
 
 
             return pred
