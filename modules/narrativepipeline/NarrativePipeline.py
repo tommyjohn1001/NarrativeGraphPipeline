@@ -1,4 +1,4 @@
-import os, json
+import os, json, sys, traceback
 from typing import List
 
 from torch.utils.data import DataLoader
@@ -149,8 +149,8 @@ class Trainer():
                 ques_mask   = batch['ques_mask'].to(args.device)
                 ans1        = batch['ans1'].to(args.device).float()
                 ans1_mask   = batch['ans1_mask'].to(args.device)
-                ans1_ids    = batch['ans1_ids']
-                ans2_ids    = batch['ans2_ids']
+                ans1_ids    = batch['ans1_ids'].to(args.device)
+                ans2_ids    = batch['ans2_ids'].to(args.device)
                 paras       = batch['paras'].to(args.device).float()
                 paras_mask  = batch['paras_mask'].to(args.device)
 
@@ -339,8 +339,8 @@ class Trainer():
                     ques_mask   = batch['ques_mask'].to(args.device)
                     ans1        = batch['ans1'].to(args.device)
                     ans1_mask   = batch['ans1_mask'].to(args.device)
-                    ans1_ids    = batch['ans1_ids']
-                    ans2_ids    = batch['ans2_ids']
+                    ans1_ids    = batch['ans1_ids'].to(args.device)
+                    ans2_ids    = batch['ans2_ids'].to(args.device)
                     paras       = batch['paras'].to(args.device)
                     paras_mask  = batch['paras_mask'].to(args.device)
 
@@ -359,9 +359,15 @@ class Trainer():
 if __name__ == '__main__':
     logging.info("* Start NarrativePipeline")
 
+    try:
+        narrative_pipeline  = Trainer()
 
-    narrative_pipeline  = Trainer()
+        narrative_pipeline.trigger_train()
 
-    narrative_pipeline.trigger_train()
+        narrative_pipeline.trigger_infer()
 
-    narrative_pipeline.trigger_infer()
+    except Exception as err:
+        exc_info = sys.exc_info()
+        with open(PATH['log'], "a+") as d_file:
+            traceback.print_exception(*exc_info, file=d_file)
+            sys.exit()

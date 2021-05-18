@@ -1,4 +1,4 @@
-import copy
+import copy, sys
 from typing import Optional
 
 
@@ -59,7 +59,7 @@ class CustomTransEnc(torch_nn.Module):
 
         for mod in self.layers:
             output1, output2 = mod(output1, output2, query_mask=query_mask,
-                                            src_key_padding_mask=src_key_padding_mask)
+                                   src_key_padding_mask=src_key_padding_mask)
 
         if self.norm is not None:
             output1 = self.norm(output1)
@@ -172,8 +172,6 @@ class Memory(torch_nn.Module):
 
 
     def forward(self, nth_para: int, ques_para: Tensor, output: Tensor):
-        # print(f"output   : {output.shape}")
-        # print(f"ques_para: {ques_para.shape}")
         gate    = self.linear1(ques_para) + self.linear2(output)
         gate    = torch.sigmoid(self.linear_gate(gate))
 
@@ -181,7 +179,6 @@ class Memory(torch_nn.Module):
             self.memory[nth_para] = ques_para.detach()
         else:
             tmp = gate * ques_para + (1 - gate) * self.memory[nth_para]
-            print()
             self.memory[nth_para] = tmp.detach()
 
 
@@ -260,16 +257,23 @@ class MemoryBasedReasoning(torch_nn.Module):
             # [seq_len_ques + seq_len_para, b, d_hid]
             if self.memory.get_mem_cell(nth_para) is None:
                 memory_cell = ques_para.squeeze(0)
+                # [seq_len_ques + seq_len_para, b, d_hid]
             else:
                 memory_cell = self.memory.get_mem_cell(nth_para).squeeze(0)
-            # [seq_len_ques + seq_len_para, b, d_hid]
+                # [seq_len_ques + seq_len_para, batch, d_hid]
 
-            output      = self.trans_enc(memory_cell, ques_para)
+            output      = self.trans_enc(memory_cell[:, :b, :], ques_para)
             # [seq_len_ques + seq_len_para, b, d_hid]
-
-            self.memory.update_mem(nth_para, ques_para, output)
 
             Y.append(output.unsqueeze(0))
+
+            if b < args.batch:
+                zeros       = torch.zeros((args.seq_len_ques + args.seq_len_para, args.batch - b, args.d_hid)).to(args.device)
+                ques_para   = torch.cat((ques_para, zeros), dim=1)
+                output      = torch.cat((output, zeros), dim=1)
+
+            self.memory.update_mem(nth_para, ques_para, output)
+            
 
         final   = self.memory.get_final_memory()
         # [seq_len_ques + seq_len_para, args.batch, d_hid]
@@ -278,11 +282,16 @@ class MemoryBasedReasoning(torch_nn.Module):
         # because tensor 'final' is for batch_size whereas in last batch step,
         # the number of datapoints are not equal batch_size
         Y.append(final[:, :b, :].unsqueeze(0))
-        Y   = torch.cat(Y, dim=0).to(args.device).permute(0, 2, 1, 3)
+        try:
+            Y   = torch.cat(Y, dim=0).to(args.device).permute(0, 2, 1, 3)
+        except RuntimeError:
+            for x in Y:
+                print(x.shape)
+            sys.exit()
         # [n_paras + 1, b, seq_len_ques + seq_len_para, d_hid]
 
         Y   = Y.reshape(n_paras + 1, b, -1)
-        # [n_paras+1, b, (seq_len_ques + seq_len_para)*d_hid]
+        # [n_paras+1, b, (seq_len_ques+seq_len_para)*d_hid]
 
         Y   = self.linearY(Y)
         # [n_paras + 1, b, d_hid]

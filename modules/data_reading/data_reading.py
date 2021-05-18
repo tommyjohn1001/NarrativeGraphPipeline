@@ -308,7 +308,7 @@ class EntryProcessor():
         documents   = pd.read_csv(f"{PATH['raw_data_dir']}/qaps.csv", header=0, index_col=None)
 
         for split in ['train', 'test', 'valid']:
-            documents   = documents[documents['set'] == split]
+            documents_   = documents[documents['set'] == split]
             for shard in range(8):
                 ### Need to check whether this shard has already been processed
                 path    = PATH['dataset'].replace("[SPLIT]", split)\
@@ -319,18 +319,19 @@ class EntryProcessor():
                 ## Make dir to contain processed files
                 os.makedirs(os.path.dirname(path), exist_ok=True)
 
-                start_  = len(documents)//8 * shard
-                end_    = start_ + len(documents)//8
+                start_  = len(documents_)//8 * shard
+                end_    = start_ + len(documents_)//8
 
 
                 # NOTE: This is for single processing
-                list_documents  = [self.f_process_entry(entry)
-                                   for entry in tqdm(documents.iloc[start_:end_].itertuples(), total=end_ - start_ )]
+                # list_documents  = [self.f_process_entry(entry)
+                #                    for entry in tqdm(documents_.iloc[start_:end_].itertuples(), total=end_ - start_ )]
                 # NOTE: This is for multi processing
-                # list_documents  = ParallelHelper(self.f_process_entry2, documents.iloc[start_:end_],
-                #                                  lambda d, l, h: d.iloc[l:h], args.num_proc).launch()
+                list_documents  = ParallelHelper(self.f_process_entry2, documents_.iloc[start_:end_],
+                                                 lambda d, l, h: d.iloc[l:h], args.num_proc).launch()
 
-                save_object(path, pd.DataFrame(list_documents))
+                if len(list_documents) > 0:
+                    save_object(path, pd.DataFrame(list_documents))
 
 
 if __name__ == '__main__':
