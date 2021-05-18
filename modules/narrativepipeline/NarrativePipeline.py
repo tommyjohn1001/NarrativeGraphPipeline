@@ -1,4 +1,4 @@
-import os, json
+import os, json, sys, traceback
 from typing import List
 
 from torch.utils.data import DataLoader
@@ -250,7 +250,7 @@ class Trainer():
         ###############################
         # Defind model and associated stuffs
         ###############################
-        model       = NarrativePipeline(self.vocab).to(args.device)
+        model       = NarrativePipeline(self.vocab).to(args.device).float()
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
         scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=0)
 
@@ -313,7 +313,7 @@ class Trainer():
         ###############################
         # Defind model and associated stuffs
         ###############################
-        model       = NarrativePipeline(self.vocab).to(args.device)
+        model       = NarrativePipeline(self.vocab).to(args.device).float()
 
         model       = self.load_model(model)
 
@@ -365,9 +365,15 @@ class Trainer():
 if __name__ == '__main__':
     logging.info("* Start NarrativePipeline")
 
+    try:
+        narrative_pipeline  = Trainer()
 
-    narrative_pipeline  = Trainer()
+        narrative_pipeline.trigger_train()
 
-    # narrative_pipeline.trigger_train()
+        narrative_pipeline.trigger_infer()
 
-    narrative_pipeline.trigger_infer()
+    except Exception as err:
+        exc_info = sys.exc_info()
+        with open(PATH['log'], "a+") as d_file:
+            traceback.print_exception(*exc_info, file=d_file)
+            sys.exit()

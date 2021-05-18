@@ -278,9 +278,9 @@ class CustomDataset(Dataset):
 
             # Pad paras and paras_mask
             if paras.shape[0] < args.n_paras:
-                print(f"Occurs: {paras.shape[0]}")
-                print(entry.doc_id)
-                print(entry.question)
+                # print(f"Occurs: {paras.shape[0]}")
+                # print(entry.doc_id)
+                # print(entry.question)
                 pad = np.zeros((args.n_paras - paras.shape[0], args.seq_len_para))
                 paras       = np.concatenate((paras, pad), axis=0) 
                 paras_mask  = np.concatenate((paras_mask, pad), axis=0)
