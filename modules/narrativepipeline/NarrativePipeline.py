@@ -334,8 +334,8 @@ class Trainer():
                 for batch in iterator_valid:
                     ques            = batch['ques'].to(args.device)
                     ques_mask       = batch['ques_mask'].to(args.device)
-                    ans1_bert_ids   = batch['ans1_bert_ids'].to(args.device)
-                    ans1_bert_mask  = batch['ans1_bert_mask'].to(args.device)
+                    # ans1_bert_ids   = batch['ans1_bert_ids'].to(args.device)
+                    # ans1_bert_mask  = batch['ans1_bert_mask'].to(args.device)
                     ans1_vocab_ids  = batch['ans1_vocab_ids'].to(args.device)
                     ans2_vocab_ids  = batch['ans2_vocab_ids'].to(args.device)
                     paras           = batch['paras'].to(args.device)

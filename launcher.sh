@@ -7,7 +7,7 @@ mkdir -p backup
 
 # echo "2. Start training"
 CUDA_VISIBLE_DEVICES=0  python -m modules.narrativepipeline.NarrativePipeline\
-    --batch 64 \
+    --batch 128 \
     --num_proc 8 \
     --n_epochs 60 \
     --lr 5e-4 \

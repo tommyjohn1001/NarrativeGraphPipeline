@@ -50,10 +50,10 @@ class SimpleBertEmbd(torch_nn.Module):
         ###################
         # Embed question
         ###################
-        _, ques_seq_embd = self.embedding(ques, ques_mask)
+        _, ques_seq_embd = self.embedding(ques.long(), ques_mask.long())
         # ques_seq_embd : [b, seq_len_ques, 768]
 
-        ones        = torch.ones(b, args.seq_len_ques)
+        ones        = torch.ones(b, args.seq_len_ques).to(args.device)
         attn_mask1  = torch.softmax(self.attn_mask_ques(ones), dim=1)
         # [b, seq_len_ques]
 
@@ -72,7 +72,8 @@ class SimpleBertEmbd(torch_nn.Module):
         paras_mask  = paras_mask.reshape((-1, seq_len_para))
         # paras, paras_mask: [b*n_paras, seq_len_para]
 
-        para_embd, _    = self.embedding(paras, paras_mask)
+        
+        para_embd, _    = self.embedding(paras.long(), paras_mask.long())
         # [b*n_paras, 768]
         para_embd       = para_embd.reshape((b, -1, 768))
         # [b, n_paras, 768]
@@ -80,9 +81,10 @@ class SimpleBertEmbd(torch_nn.Module):
 
         # Dividing by temperature is a technique from topK temperature
         # By dividing with temperature > 1, we decrease the variance of softmax distribution
+        ones        = torch.ones(b, args.n_paras).to(args.device)
         attn_mask2  = torch.softmax(self.attn_mask_paras(ones)/self.temperature, dim=1)
         attn_mask2  = attn_mask2.unsqueeze(2).repeat(1, 1, 768)
-        para_embd   = (para_embd * attn_mask2).sum(1)
+        para_embd   = (para_embd * attn_mask2)
         # [b, n_paras, 768]
 
 
@@ -90,8 +92,8 @@ class SimpleBertEmbd(torch_nn.Module):
         ###################
         # Embed answer
         ###################
-        if ans:
-            _, ans_seq_embd = self.embedding(ans, ans_mask)
+        if torch.is_tensor(ans):
+            _, ans_seq_embd = self.embedding(ans.long(), ans_mask.long())
             # ans_seq_embd : [b, seq_len_ans, 768]
         else:
             ans_seq_embd = None
