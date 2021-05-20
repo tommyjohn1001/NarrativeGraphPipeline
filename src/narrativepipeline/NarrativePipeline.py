@@ -21,7 +21,7 @@ class  NarrativePipeline(torch_nn.Module):
 
         self.embd_layer = FineGrain()
         self.reasoning  = GraphBasedMemoryReasoning()
-        self.ans_infer  = TransDecoder(vocab, self.embd_layer.embedding)
+        self.ans_infer  = TransDecoder(vocab, self.embd_layer)
 
     def forward(self, ques, ques_mask, ans, ans_mask,
                 paras, paras_mask, is_inferring=False):
@@ -36,7 +36,7 @@ class  NarrativePipeline(torch_nn.Module):
         ####################
         # Embed question, paras and answer
         ####################
-        ques, paras, ans = self.embd_layer(ques, ques_mask, paras, paras_mask, ans, ans_mask)
+        ques, paras, ans = self.embd_layer(ques, paras, ans, ques_mask, paras_mask, ans_mask)
         # ques : [b, seq_len_ques, d_hid]
         # paras: [b, n_paras, seq_len_ques, d_hid]
         # ans  : [b, seq_len_ans, d_hid] or None
@@ -191,7 +191,7 @@ class Trainer():
 
     def test(self, model, dataset_test, criterion):
         nth_batch, n_samples            = 0, 0
-        loss_test                       = 0        
+        loss_test                       = 0
 
         model.eval()
 
@@ -236,8 +236,8 @@ class Trainer():
         ###############################
         # Load data
         ###############################
-        dataset_train   = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "train"))
-        dataset_test    = CustomDataset(os.path.dirname(PATH['dataset_para']).replace("[SPLIT]", "test"))
+        dataset_train   = CustomDataset(os.path.dirname(PATH['dataset']).replace("[SPLIT]", "train"), self.vocab)
+        dataset_test    = CustomDataset(os.path.dirname(PATH['dataset']).replace("[SPLIT]", "test"), self.vocab)
 
 
         ###############################
@@ -304,8 +304,7 @@ class Trainer():
         ###############################
         # Load data
         ###############################
-        dataset_valid   = CustomDataset(os.path.dirname(PATH['dataset']).replace("[SPLIT]", "valid"),
-                                      self.vocab)
+        dataset_valid   = CustomDataset(os.path.dirname(PATH['dataset']).replace("[SPLIT]", "valid"), self.vocab)
 
         ###############################
         # Defind model and associated stuffs
@@ -366,5 +365,8 @@ if __name__ == '__main__':
     except Exception as err:
         exc_info = sys.exc_info()
         with open(PATH['log'], "a+") as d_file:
-            traceback.print_exception(*exc_info, file=d_file)
+            if args.is_debug:
+                traceback.print_exception(*exc_info)
+            else:
+                traceback.print_exception(*exc_info, file=d_file)
             sys.exit()

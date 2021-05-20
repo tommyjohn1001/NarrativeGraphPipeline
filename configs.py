@@ -19,6 +19,7 @@ parser.add_argument("--n_shards", type=int, help="Number of chunks to split from
 parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--w_decay", type=float, default=0, help="Weight decay")
 parser.add_argument("--is_debug", type=bool, default=False, help="true | false")
+parser.add_argument("--task", type=str, default="train", help="train | infer")
 
 # args = parser.parse_args()
 args, _ = parser.parse_known_args()
@@ -62,21 +63,35 @@ args.n_gram_beam    = 5
 # Config path of backup files
 ###############################
 PATH    = {
+    'raw_data_dir'      : [
+        "/Users/hoangle/Projects/VinAI/_data/NarrativeQA",
+        "/home/tommy/Projects/_data/NarrativeQA",
+        "/home/ubuntu/NarrativeQA",
+        "/root/NarrativeQA"
+    ],
     'bert'              : [
         "/root/bert-base-uncased",
         "/home/ubuntu/bert-base-uncased",
         "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased",
         "/home/tommy/Projects/_pretrained/BERT/bert-base-uncased"
     ],
+    'glove_embd'        : [
+        ".vector_cache/",
+        "/Users/hoangle/Projects/VinAI/_pretrained/bert-base-uncased",
+        "/home/tommy/Projects/_pretrained/GloVe"
+    ],
 
     ## Paths associated with Data Reading
-    'dataset_para'      : "backup/[SPLIT]/data_[SHARD].csv",
-    'processed_contx'   : "backup/proc_contx_[SPLIT].json",
+    'processed_contx'   : "backup/proc_contx/[ID].json",
+    'dataset'           : "backup/[SPLIT]/data_[SHARD].csv",
     'vocab'             : "backup/vocab.txt",
+
+    ## Paths associated with models
     'saved_model'       : "backup/model.pt",
     'saved_chkpoint'    : "backup/chkpoint.pth.tar",
     'prediction'        : "backup/predictions.json",
     'memory'            : "backup/memory.pt",
+
     'log'               : "run.log"
 }
 

@@ -18,7 +18,7 @@ class BertEmbedding(torch_nn.Module):
             param.requires_grad = False
 
     def forward(self, X, X_mask=None):
-        # X, X_mask: [b, seq_len]
+        # X, X_mask: [b, *, 768]
 
         tmp = self.embedding(inputs_embeds=X, attention_mask=X_mask)
 
@@ -30,22 +30,25 @@ class FineGrain(torch_nn.Module):
     def __init__(self):
         super().__init__()
 
-        d_hid  = args.d_hid
-        d_emb  = args.d_embd
+        self.d_hid  = args.d_hid
+        d_emb       = args.d_embd
 
         ## Modules for embedding
         self.embedding      = BertEmbedding()
-        self.biGRU_emb      = torch_nn.GRU(d_emb, d_hid//2, num_layers=5,
+        self.linear1        = torch_nn.Linear(d_emb, 768, bias=False)
+        self.linear_ans     = torch_nn.Linear(768, self.d_hid, bias=False)
+
+        self.biGRU_emb      = torch_nn.GRU(768, self.d_hid//2, num_layers=5,
                                            batch_first=True, bidirectional=True)
         self.linear_embd    = torch_nn.Sequential(
-            torch_nn.Linear(d_emb, d_emb),
-            torch_nn.ReLU()
+            torch_nn.Linear(768, 768),
+            torch_nn.ReLU(),
+            torch_nn.Dropout(args.dropout)
         )
 
-        self.biGRU_CoAttn   = torch_nn.GRU(d_hid, d_hid//2, num_layers=5,
+        self.biGRU_CoAttn   = torch_nn.GRU(self.d_hid, self.d_hid//2, num_layers=5,
                                        batch_first=True, bidirectional=True)
 
-        self.linear_ans     = torch_nn.Linear(768, d_hid, bias=False)
 
     def forward(self, ques, paras, ans, ques_mask, paras_mask, ans_mask):
         # ques          : [b, seq_len_ques, 200]
@@ -55,26 +58,34 @@ class FineGrain(torch_nn.Module):
         # paras_mask    : [b, n_paras, seq_len_para]
         # ans_mask      : [b, seq_len_ans]
 
+        b, seq_len_ques, _ = ques.shape
+        n_paras            = paras.shape[1]
+
+
+        ques    = self.linear1(ques.float())
+        paras   = self.linear1(paras.float())
+        ans     = self.linear1(ans.float())
+        # ques          : [b, seq_len_ques, 768]
+        # paras         : [b, n_paras, seq_len_para, 768]
+        # ans           : [b, seq_len_ans, 768]
+
         #########################
         # Operate CoAttention question
         # with each paragraph
         #########################
-        b, seq_len_ques, _ = ques.shape
-        n_paras            = paras.shape[1]
-
         question    = torch.zeros((b, seq_len_ques, self.d_hid)).to(args.device)
-        paragraphs  = None
+        paragraphs  = []
 
-        ques = self.embedding(ques, ques_mask)[0]
+        ques = self.embedding(ques, ques_mask)
         for ith in range(n_paras):
-            para        = paras[:, ith, :]
+            para        = paras[:, ith, :, :]
             para_mask   = paras_mask[:, ith, :]
 
             ###################
             # Embed query and context
             ###################
             L_q = ques
-            L_s = self.embedding(para, para_mask)[0]
+            L_s = self.embedding(para, para_mask)
             # L_q: [b, seq_len_ques, 768]
             # L_s: [b, seq_len_para, 768]
 
@@ -82,7 +93,6 @@ class FineGrain(torch_nn.Module):
 
             E_q = self.biGRU_emb(L_q)[0]
             E_s = self.biGRU_emb(L_s)[0]
-
             # E_q: [b, seq_len_ques, d_hid]
             # E_s: [b, seq_len_para, d_hid]
 
@@ -103,30 +113,34 @@ class FineGrain(torch_nn.Module):
 
             X   = torch.bmm(torch_f.softmax(A, dim=1), S_q)
             C_s = self.biGRU_CoAttn(X)[0]
-            C_s = transpose(C_s)
 
             C_s = torch.unsqueeze(C_s, 1)
-            # C_s: [b, 1, seq_len_ques, d_hid]
+            # C_s: [b, 1, seq_len_para, d_hid]
 
 
             question += S_q
-            if paragraphs is None:
-                paragraphs = C_s
-            else:
-                paragraphs = torch.cat((paragraphs, C_s), dim=1)
+            paragraphs.append(C_s)
+
+        paragraphs = torch.cat((paragraphs), dim=1)
 
         # question  : [b, seq_len_ques, d_hid]
-        # paragraphs: [b, n_paras, seq_len_ques, d_hid]
+        # paragraphs: [b, n_paras, seq_len_para, d_hid]
 
 
         ###################
         # Embed answer
         ###################
-        if ans:
-            _, answer   = self.embedding(ans, ans_mask)
-            answer      = self.linear_ans(answer)
+        if torch.is_tensor(ans):
+            answer   = self.encode_ans(ans, ans_mask)
             # [b, seq_len_ans, d_hid]
         else:
             answer = None
 
         return question, paragraphs, answer
+
+    def encode_ans(self, ans, ans_mask):
+        # ans           : [b, seq_len_ans, 200]
+        # ans_mask      : [b, seq_len_ans]
+
+        return self.linear_ans(self.embedding(ans, ans_mask))
+        # [b, seq_len_ans, d_hid]
