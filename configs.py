@@ -18,6 +18,7 @@ parser.add_argument("--n_shards", type=int, help="Number of chunks to split from
                     default=8)
 parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
 parser.add_argument("--w_decay", type=float, default=0, help="Weight decay")
+parser.add_argument("--is_debug", type=bool, default=False, help="true | false")
 
 # args = parser.parse_args()
 args, _ = parser.parse_known_args()
@@ -93,5 +94,8 @@ for key, val in PATH.items():
 ###############################
 # Config logging
 ###############################
-logging.basicConfig(filename=PATH['log'], filemode='a+', format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
+if args.is_debug:
+    logging.basicConfig(format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
+else:
+    logging.basicConfig(filename=PATH['log'], filemode='a+', format='%(asctime)s: %(message)s', datefmt='%b-%d-%Y %H:%M:%S')
 logging.getLogger().setLevel(logging.INFO)

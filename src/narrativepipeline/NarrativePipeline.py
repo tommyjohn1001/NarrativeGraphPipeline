@@ -1,5 +1,5 @@
-from typing import List
 import os, json, sys, traceback
+from typing import List
 
 
 from torch.utils.data import DataLoader
@@ -24,17 +24,13 @@ class  NarrativePipeline(torch_nn.Module):
         self.ans_infer  = TransDecoder(vocab, self.embd_layer.embedding)
 
     def forward(self, ques, ques_mask, ans, ans_mask,
-                paras, paras_len, paras_mask, edge_indx,
-                edge_len, is_inferring=False):
-        # ques           : [b, seq_len_ques]
-        # ques_mask      : [b, seq_len_ques]
-        # ans1_bert_ids  : [b, seq_len_ans]
-        # ans1_bert_mask : [b, seq_len_ans]
-        # paras          : [b, n_paras, seq_len_para]
-        # paras_len      : [b]
-        # paras_mask     : [b, n_paras, seq_len_para]
-        # edge_indx      : [b, 2, n_edges]
-        # edge_len       : [b]
+                paras, paras_mask, is_inferring=False):
+        # ques       : [b, seq_len_ques, 200]
+        # ques_mask  : [b, seq_len_ques]
+        # paras      : [b, n_paras, seq_len_para, 200]
+        # paras_mask : [b, n_paras, seq_len_para]
+        # ans        : [b, seq_len_ans, 200]
+        # ans_mask   : [b, seq_len_ans]
 
 
         ####################
@@ -247,7 +243,7 @@ class Trainer():
         ###############################
         # Defind model and associated stuffs
         ###############################
-        model       = NarrativePipeline(self.vocab).to(args.device)
+        model       = NarrativePipeline(self.vocab).to(args.device).float()
         optimizer   = AdamW(model.parameters(), lr=args.lr, weight_decay=args.w_decay)
         scheduler   = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=0)
 
@@ -314,7 +310,8 @@ class Trainer():
         ###############################
         # Defind model and associated stuffs
         ###############################
-        model       = NarrativePipeline(self.vocab).to(args.device).to(args.device).float()
+        model       = NarrativePipeline(self.vocab).to(args.device).float()
+
         model       = self.load_model(model)
 
         ###############################

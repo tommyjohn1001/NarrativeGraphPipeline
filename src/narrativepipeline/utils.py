@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 import spacy
 
-from modules.utils import ParallelHelper
+from src.utils import ParallelHelper
 from configs import logging, args, PATH
 
 
@@ -219,6 +219,12 @@ class CustomDataset(Dataset):
 
             paras       = np.vstack(paras)
             paras_mask  = np.vstack(paras_mask)
+
+            # Pad paras and paras_mask
+            if paras.shape[0] < args.n_paras:
+                pad = np.zeros((args.n_paras - paras.shape[0], args.seq_len_para))
+                paras       = np.concatenate((paras, pad), axis=0) 
+                paras_mask  = np.concatenate((paras_mask, pad), axis=0)
 
 
             queue.put({
