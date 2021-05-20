@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 20 2021, 22:27
+- Change code folder name from 'modules' to 'src'
+- Add new graph-based memory architecture *MemoryGraph* for reasoning
+- Reuse module *FineGrain* to embed question and paras
+- Change *Trainer* and *CustomDataset* to align with new updates
+
 ## May 17 2021, 21:24
 - Modify `configs.py` and fit it with data *version 3.0*
 - Modify module *NarrativePipeline*: fit with new field names

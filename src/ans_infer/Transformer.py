@@ -2,8 +2,8 @@
 import torch.nn as torch_nn
 import torch
 
-from modules.narrativepipeline.utils import Vocab
-from modules.ans_infer.utils import BeamSearch
+from src.narrativepipeline.utils import Vocab
+from src.ans_infer.utils import BeamSearch
 from configs import args
 
 class TransDecoder(torch_nn.Module):
@@ -60,9 +60,8 @@ class TransDecoder(torch_nn.Module):
 
         return mask
 
-    def forward(self, Y, ans, ans_mask, is_inferring=False):
+    def forward(self, Y, ans, is_inferring=False):
         # Y         : [b, seq_len_contx, d_hid * 2]
-        # ans_mask  : [b, seq_len_ans]
         # ans       : [b, seq_len_ans, 768]
 
         batch   = Y.shape[0]
@@ -120,20 +119,6 @@ class TransDecoder(torch_nn.Module):
 
             pred    = self.ff_pred(pred)
             # [b, seq_len_ans, d_vocab]
-
-            # NOTE: May 17: It doesnt know whether this masking step is effective, so I temporarily comment
-            # ########################
-            # # Multiply 'pred' with 2 masks
-            # ########################
-            # # Multiply 'pred' with 'ans_mask' to ignore masked position in tensor 'pred'
-            # ans_mask    = ans_mask.unsqueeze(-1).repeat(1, 1, self.d_vocab).to(args.device)
-            # pred        = pred * ans_mask
-            # # pred: [b, seq_len_ans, d_vocab]
-
-            # # Multiply 'pred' with mask SEP
-            # sep_mask    = self.get_mask_sep(pred).to(args.device)
-            # pred        = pred * sep_mask
-            # # pred: [b, seq_len_ans, d_vocab]
 
 
             return pred

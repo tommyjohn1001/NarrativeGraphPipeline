@@ -9,19 +9,19 @@ class GraphReasoning(torch_nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.linear = torch_nn.Linear(768, args.graph_d_project)
+        self.linear = torch_nn.Linear(768, args.d_graph)
 
         # GCN
-        self.gcn1           = torch_g_nn.GCNConv(args.graph_d_project, args.graph_d_project)
-        self.gcn2           = torch_g_nn.GCNConv(args.graph_d_project, args.graph_d_project//2)
-        self.gcn3           = torch_g_nn.GCNConv(args.graph_d_project//2, args.graph_d_project//2)
-        self.gcn4           = torch_g_nn.GCNConv(args.graph_d_project//2, args.graph_d_project//4)
+        self.gcn1           = torch_g_nn.GCNConv(args.d_graph, args.d_graph)
+        self.gcn2           = torch_g_nn.GCNConv(args.d_graph, args.d_graph//2)
+        self.gcn3           = torch_g_nn.GCNConv(args.d_graph//2, args.d_graph//2)
+        self.gcn4           = torch_g_nn.GCNConv(args.d_graph//2, args.d_graph//4)
         self.act_leakRelu   = torch_nn.LeakyReLU(inplace=True)
 
         self.fc     = torch_nn.Sequential(
-            torch_nn.Linear(args.graph_d_project//4, args.graph_d_project//4),
+            torch_nn.Linear(args.d_graph//4, args.d_graph//4),
             torch_nn.Dropout(args.dropout),
-            torch_nn.Linear(args.graph_d_project//4, args.d_hid),
+            torch_nn.Linear(args.d_graph//4, args.d_hid),
             torch_nn.LeakyReLU()
         )
 
@@ -54,7 +54,7 @@ class GraphReasoning(torch_nn.Module):
                                                            edge_indx, edge_len)
         X           = gcn(node_feat, edge_indx)
         mean_pool   = global_mean_pool(X, batch_indx)
-        # [b, graph_d_project//4]
+        # [b, d_graph//4]
 
         final_vec   = self.fc(mean_pool)
         # [b, d_hid]

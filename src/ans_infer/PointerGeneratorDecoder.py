@@ -3,8 +3,8 @@ from random import random
 import torch.nn as torch_nn
 import torch
 
-from modules.utils import NonLinear, transpose
-from modules.ans_infer.utils import *
+from src.utils import NonLinear, transpose
+from src.ans_infer.utils import *
 from configs import args
 
 

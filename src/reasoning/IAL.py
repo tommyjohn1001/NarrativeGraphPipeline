@@ -2,7 +2,7 @@ import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 
-from modules.utils import NonLinear, transpose
+from src.utils import NonLinear, transpose
 from configs import args
 
 Block   = 200

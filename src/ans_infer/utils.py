@@ -4,7 +4,7 @@ import re
 import torch.nn as torch_nn
 import torch
 
-from modules.utils import transpose
+from src.utils import transpose
 
 class AttentivePooling(torch_nn.Module):
     def __init__(self, dim):

@@ -1,5 +1,6 @@
 """This file processes arguments and configs"""
 
+from itertools import combinations
 import argparse, logging, os
 
 import torch
@@ -34,23 +35,26 @@ args.device     = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 ## other args
 args.multi_gpus = torch.cuda.device_count() > 0
 
-args.seq_len_ques       = 40  + 2   # The reason why sequence length of ques, contx and ans
-args.seq_len_para       = 120 + 2   # plus 2 is for CLS and SEP token
-args.seq_len_ans        = 40  + 2   # maximum answer length of dataset
-args.n_paras            = 30
-args.d_embd             = 200
-args.d_hid              = 64
-args.max_len_ans        = 12        # maximum inferring steps of decoder
-args.min_count_PGD      = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
-args.d_vocab            = 32715     # Vocab size
-args.dropout            = 0.15
-args.n_layers           = 5
+args.seq_len_ques   = 40  + 2   # The reason why sequence length of ques, contx and ans
+args.seq_len_para   = 120 + 2   # plus 2 is for CLS and SEP token
+args.seq_len_ans    = 40  + 2   # maximum answer length of dataset
+args.n_paras        = 30
+args.d_embd         = 200
+args.d_hid          = 64
+args.max_len_ans    = 12        # maximum inferring steps of decoder
+args.min_count_PGD  = 10        # min occurences of word to be added to vocab of PointerGeneratorDecoder
+args.d_vocab        = 32715     # Vocab size
+args.dropout        = 0.15
+args.n_layers       = 5
 
-args.graph_d_project    = 2048
-args.n_edges            = 3120
+args.trans_nheads   = 4
+args.trans_nlayers  = 3
+args.d_graph        = 2048
+args.n_edges        = 3120
+args.n_nodes        = len(list(combinations(range(args.n_paras), 2)))
 
-args.beam_size          = 10
-args.n_gram_beam        = 5
+args.beam_size      = 10
+args.n_gram_beam    = 5
 
 
 ###############################
@@ -71,6 +75,7 @@ PATH    = {
     'saved_model'       : "backup/model.pt",
     'saved_chkpoint'    : "backup/chkpoint.pth.tar",
     'prediction'        : "backup/predictions.json",
+    'memory'            : "backup/memory.pt",
     'log'               : "run.log"
 }
 
