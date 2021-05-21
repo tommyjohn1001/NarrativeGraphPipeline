@@ -320,11 +320,11 @@ class CustomDataset(Dataset):
         # Fill self.ques, self.ans1,  self.ans2,
         # answers' mask and index
         ######################
-        # NOTE: Multiprocessing
-        # entries = ParallelHelper(self.f_process_file_multi, df, lambda dat, l, h: dat.iloc[l:h],
-        #                          args.num_proc).launch()
-        # NOTE: Single processing
-        entries = list(map(self.f_process_file_single, tqdm(df.itertuples(), total=len(df), desc=os.path.basename(path_file))))
+        if args.num_proc > 1:
+            entries = ParallelHelper(self.f_process_file_multi, df, lambda dat, l, h: dat.iloc[l:h],
+                                    args.num_proc).launch()
+        else:
+            entries = list(map(self.f_process_file_single, tqdm(df.itertuples(), total=len(df), desc=os.path.basename(path_file))))
 
         for entry in entries:
             # self.docId.append(entry['docId'])

@@ -288,8 +288,8 @@ class Memory(torch_nn.Module):
             self.node_feats_mem = tmp['node_feats_mem'].to(args.device)
             self.edge_index     = tmp['edge_index'].to(args.device)
         else:
-            self.node_feats_mem = torch.rand(self.batch, self.n_nodes, self.d_hid)
-            self.edge_index     = self.gen_edges()
+            self.node_feats_mem = torch.rand(self.batch, self.n_nodes, self.d_hid).to(args.device)
+            self.edge_index     = self.gen_edges().to(args.device)
 
 
     def forward(self):
