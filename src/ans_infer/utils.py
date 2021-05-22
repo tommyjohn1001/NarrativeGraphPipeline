@@ -289,7 +289,7 @@ class BeamSearch():
         return topBeam_dist, topBeam_tok
 
     def select_mix_beam(self, distribution):
-        temperature     = 1.1
+        temperature     = 1.5
 
         top_dist, top_tok = torch.topk(distribution, 10000, 0)
 

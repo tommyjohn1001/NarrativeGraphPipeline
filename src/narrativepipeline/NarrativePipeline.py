@@ -341,7 +341,7 @@ class Trainer():
                                         paras, paras_mask, is_inferring=True)
                     for pred_, ans1_, ans2_ in zip(pred, ans1_ids, ans2_ids):
                         pred_result.append({
-                            'pred': ' '.join(self.vocab.itos(pred_.tolist())),
+                            'pred': ' '.join(self.vocab.itos(list(pred_))),
                             'ans1': ' '.join(self.vocab.itos(ans1_.tolist())),
                             'ans2': ' '.join(self.vocab.itos(ans2_.tolist()))
                         })
@@ -350,14 +350,14 @@ class Trainer():
                         json.dump(pred_result, result_file, indent=2, ensure_ascii=False)
 
 if __name__ == '__main__':
-    logging.info("* Start NarrativePipeline")
-
     try:
         narrative_pipeline  = Trainer()
 
         if args.task == "train":
+            logging.info("* Start NarrativePipeline: training")
             narrative_pipeline.trigger_train()
         elif args.task == "infer":
+            logging.info("* Start NarrativePipeline: inferring")
             narrative_pipeline.trigger_infer()
         else:
             raise AssertionError("'task' argument incorrect.")

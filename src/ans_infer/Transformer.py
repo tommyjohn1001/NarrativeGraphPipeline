@@ -46,11 +46,12 @@ class TransDecoder(torch_nn.Module):
                 # toks_emb = self.embedding(toks_emb)[0]
                 # if len(toks_emb.shape) == 2:
                 #     toks_emb = toks_emb.unsqueeze(0)
-                toks_emb    = self.vocab.conv_ids_to_vecs(tok_ids)
-                toks_emb    = torch.vstack(toks_emb).unsqueeze(0)
+                toks_emb    = self.vocab.conv_ids_to_vecs(list(tok_ids))
+                toks_emb    = torch.vstack([torch.from_numpy(embd) for embd in toks_emb]).unsqueeze(0).to(args.device)
                 toks_mask   = torch.ones((1, len(tok_ids))).to(args.device)
                 # [b=1, seq=*, 200]
 
+                toks_emb = self.embd_layer.linear1(toks_emb.float())
                 toks_emb = self.embd_layer.encode_ans(toks_emb, toks_mask).transpose(0, 1)
                 # [seq=*, b=1, d_hid]
 
@@ -67,7 +68,7 @@ class TransDecoder(torch_nn.Module):
             pred        = []
             beam_search = BeamSearch(beam_size=args.beam_size, max_len=self.max_len_ans,
                                      model=infer, no_repeat_ngram_size=args.n_gram_beam,
-                                     topk_strategy="select_mix_beam")
+                                     topk_strategy="select_nucleus_sample_nobeam")
 
             for b in range(batch):
                 indices = beam_search.search(Y[:, b, :])

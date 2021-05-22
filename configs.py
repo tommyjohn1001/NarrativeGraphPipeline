@@ -55,7 +55,7 @@ args.d_graph        = 2048
 args.n_edges        = 3120
 args.n_nodes        = len(list(combinations(range(args.n_paras), 2)))
 
-args.beam_size      = 10
+args.beam_size      = 20
 args.n_gram_beam    = 5
 
 

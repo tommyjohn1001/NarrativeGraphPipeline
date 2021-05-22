@@ -301,6 +301,12 @@ class Memory(torch_nn.Module):
         Args:
             Y (Tensor): output of Graph module
         """
+        # Y: [b, n_nodes, d_hid]
+        b   = Y.shape[0]
+        if b < args.batch:
+            tmp = self.node_feats_mem[b:, :, :]
+            Y   = torch.cat((Y, tmp), dim=0)
+        # Y: [batch, n_nodes, d_hid]
 
         self.node_feats_mem = Y.detach()
 
