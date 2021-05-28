@@ -1,7 +1,7 @@
 '''This file contain modules for loading data and training procedure. Other component layers
 are in other directories.'''
 from collections import defaultdict
-import glob, ast, gc, json
+import glob, ast, gc, json, os
 
 from torch.utils.data import Dataset
 from torchtext.vocab import Vectors
@@ -172,7 +172,7 @@ class CustomDataset(Dataset):
 
         return sent_, sent_mask_, np.array(sent_ids_, dtype=np.int)
 
-    def f_process_file(self, entries, queue, arg):
+    def f_process_file_multi(self, entries, queue, arg):
         for entry in entries.itertuples():
             ###########################
             # Process question
@@ -233,6 +233,66 @@ class CustomDataset(Dataset):
                 'paras_mask'    : paras_mask
             })
 
+    def f_process_file_single(self, entry):
+        ###########################
+        # Process question
+        ###########################
+        ques, ques_mask, _  = self.process_sent(entry.question, args.seq_len_ques)
+        ques    = np.vstack(ques)
+
+
+        ###########################
+        # Process answers
+        ###########################
+        answers         = ast.literal_eval(entry.answers)
+
+        # This trick ensures training process occurs in longer answer
+        if len(' '.split(answers[0])) < len(' '.split(answers[1])):
+            answers[0], answers[1] = answers[1], answers[0]
+
+        ans1, ans1_mask, ans1_ids   = self.process_sent(answers[0], args.seq_len_ans)
+        ans2, _, ans2_ids           = self.process_sent(answers[0], args.seq_len_ans)
+        ans1    = np.vstack(ans1)
+        ans2    = np.vstack(ans2)
+
+
+        ###########################
+        # Process context
+        ###########################
+        En      = ast.literal_eval(entry.En)
+        Hn      = ast.literal_eval(entry.Hn)
+
+        contx = En[self.n_exchange:args.n_paras] + Hn[:self.n_exchange]
+
+        # Process context
+        paras, paras_mask = [], []
+        for sent in contx:
+            sent, sent_mask, _ = self.process_sent(sent, args.seq_len_para)
+            paras.append(np.expand_dims(sent, axis=0))
+            paras_mask.append(np.expand_dims(sent_mask, axis=0))
+
+        # This piece of code pads zero tensor to 'paras' and 'paras_mask'
+        # in case no. paras is less than args.n_paras
+        for _ in range(args.n_paras - len(paras)):
+            paras.append(np.zeros((1, args.seq_len_para, args.d_embd)))
+            paras_mask.append(np.zeros((1, args.seq_len_para)))
+
+        paras       = np.vstack(paras)
+        paras_mask  = np.vstack(paras_mask)
+
+
+        return {
+            'ques'          : ques,
+            'ques_mask'     : ques_mask,
+            'ans1'          : ans1,
+            'ans2'          : ans2,
+            'ans1_mask'     : ans1_mask,
+            'ans1_ids'      : ans1_ids,
+            'ans2_ids'      : ans2_ids,
+            'paras'         : paras,
+            'paras_mask'    : paras_mask
+        }
+
     def read_shard(self, path_file):
         df  = pd.read_csv(path_file, index_col=None, header=0)
 
@@ -254,8 +314,11 @@ class CustomDataset(Dataset):
         # Fill self.ques, self.ans1,  self.ans2,
         # answers' mask and index
         ######################
-        entries = ParallelHelper(self.f_process_file, df, lambda dat, l, h: dat.iloc[l:h],
+        # NOTE: Multiprocessing
+        entries = ParallelHelper(self.f_process_file_multi, df, lambda dat, l, h: dat.iloc[l:h],
                                  args.num_proc).launch()
+        # NOTE: Single processing
+        # entries = list(map(self.f_process_file_single, tqdm(df.itertuples(), total=len(df), desc=os.path.basename(path_file))))
 
         for entry in entries:
             # self.docId.append(entry['docId'])

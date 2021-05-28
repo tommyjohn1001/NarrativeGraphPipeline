@@ -20,7 +20,7 @@ class  NarrativePipeline(torch_nn.Module):
 
         self.embd_layer = BertBasedEmbd()
         self.reasoning  = MemoryBasedReasoning()
-        self.ans_infer  = TransDecoder(vocab, self.embd_layer.embedding)
+        self.ans_infer  = TransDecoder(vocab, self.embd_layer)
 
     def forward(self, ques, ques_mask, ans, ans_mask,
                 paras, paras_mask, is_inferring=False):
@@ -130,6 +130,20 @@ class Trainer():
             logging.info("=> Saved checkpoint instance existed. Load it.")
         return torch.load(PATH['saved_chkpoint'])
 
+    def calc_loss(self, criterion, pred, ans1_ids, ans2_ids):
+        # pred      : [b, seq_len_ans, d_vocab]
+        # ans1_ids  : [b, seq_len_ans]
+        # ans2_ids  : [b, seq_len_ans]
+
+        pred_flat   = pred[:, :-1, :].reshape(-1, args.d_vocab)
+        ans1_flat   = ans1_ids[:, 1:].reshape(-1)
+        ans2_flat   = ans2_ids[:, 1:].reshape(-1)
+
+        loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
+                      0.3 * criterion(pred_flat, ans2_flat)
+
+        return loss
+
     def train(self, model, dataset_train:CustomDataset, criterion, optimizer, scheduler):
         loss_train  = 0
         nth_batch   = 0
@@ -176,12 +190,7 @@ class Trainer():
 
 
                 # pred: [b, seq_len_ans, d_vocab]
-                pred_flat   = pred.view(-1, args.d_vocab)
-                ans1_flat   = ans1_ids.view(-1)
-                ans2_flat   = ans2_ids.view(-1)
-
-                loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
-                              0.3 * criterion(pred_flat, ans2_flat)
+                loss    = self.calc_loss(criterion, pred, ans1_ids, ans2_ids)
                 loss.backward()
 
                 torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1)
@@ -223,12 +232,7 @@ class Trainer():
                     pred        = model(ques, ques_mask, ans1, ans1_mask,
                                         paras, paras_mask, is_inferring=False)
                     # pred: [batch, seq_len_ans, d_vocab]
-                    pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1_ids.view(-1)
-                    ans2_flat   = ans2_ids.view(-1)
-
-                    loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
-                                  0.3 * criterion(pred_flat, ans2_flat)
+                    loss    = self.calc_loss(criterion, pred, ans1_ids, ans2_ids)
 
                     loss_test   += loss.detach().item()
 
@@ -348,7 +352,7 @@ class Trainer():
                                         paras, paras_mask, is_inferring=True)
                     for pred_, ans1_, ans2_ in zip(pred, ans1_ids, ans2_ids):
                         pred_result.append({
-                            'pred': ' '.join(self.vocab.itos(pred_.tolist())),
+                            'pred': ' '.join(self.vocab.itos(list(pred_))),
                             'ans1': ' '.join(self.vocab.itos(ans1_.tolist())),
                             'ans2': ' '.join(self.vocab.itos(ans2_.tolist()))
                         })
@@ -357,17 +361,24 @@ class Trainer():
                         json.dump(pred_result, result_file, indent=2, ensure_ascii=False)
 
 if __name__ == '__main__':
-    logging.info("* Start NarrativePipeline")
-
     try:
         narrative_pipeline  = Trainer()
 
-        narrative_pipeline.trigger_train()
-
-        narrative_pipeline.trigger_infer()
+        if args.task == "train":
+            logging.info("* Start NarrativePipeline: training")
+            narrative_pipeline.trigger_train()
+        elif args.task == "infer":
+            logging.info("* Start NarrativePipeline: inferring")
+            narrative_pipeline.trigger_infer()
+        else:
+            raise AssertionError("'task' argument incorrect.")
 
     except Exception as err:
         exc_info = sys.exc_info()
         with open(PATH['log'], "a+") as d_file:
-            traceback.print_exception(*exc_info, file=d_file)
+            if args.is_debug:
+                traceback.print_exception(*exc_info)
+            else:
+                traceback.print_exception(*exc_info, file=d_file)
             sys.exit()
+

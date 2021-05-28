@@ -2,12 +2,13 @@
 import torch.nn as torch_nn
 import torch
 
+from modules.finegrained.FineGrain import FineGrain
 from modules.narrativepipeline.utils import Vocab
 from modules.ans_infer.utils import BeamSearch
 from configs import args
 
 class TransDecoder(torch_nn.Module):
-    def __init__(self, vocab: Vocab, bert_model) -> None:
+    def __init__(self, vocab: Vocab, embd_layer: FineGrain) -> None:
         super().__init__()
 
         self.vocab      = vocab
@@ -20,8 +21,7 @@ class TransDecoder(torch_nn.Module):
         decoder_layer   = torch_nn.TransformerDecoderLayer(d_model=self.d_hid, nhead=args.trans_nheads)
         self.decoder    = torch_nn.TransformerDecoder(decoder_layer, num_layers=args.trans_nlayers)
 
-        self.embedding  = bert_model
-        self.ff_ans     = torch_nn.Linear(self.d_hid, self.d_hid, bias=False)
+        self.embd_layer = embd_layer
 
         self.ff_pred    = torch_nn.Sequential(
             torch_nn.Linear(self.d_hid, self.d_vocab),
@@ -30,7 +30,7 @@ class TransDecoder(torch_nn.Module):
         )
 
     def forward(self, Y, ans, is_inferring=False):
-        # Y         : [n_paras+1, b, d_hid]
+        # Y         : [b, n_nodes + n_paras*seq_len_para, d_hid]
         # ans       : [b, seq_len_ans, d_hid]
 
         batch   = Y.shape[0]
@@ -42,13 +42,17 @@ class TransDecoder(torch_nn.Module):
                 Y      = Y.unsqueeze(1)
                 # [n_paras+1, b=1, d_hid]
 
-                toks_emb = torch.LongTensor(tok_ids).unsqueeze(0).to(args.device)
-                toks_emb = self.embedding(toks_emb)[0]
-                if len(toks_emb.shape) == 2:
-                    toks_emb = toks_emb.unsqueeze(0)
-                # [b=1, seq=*, 768]
+                # toks_emb = torch.LongTensor(tok_ids).unsqueeze(0).to(args.device)
+                # toks_emb = self.embedding(toks_emb)[0]
+                # if len(toks_emb.shape) == 2:
+                #     toks_emb = toks_emb.unsqueeze(0)
+                toks_emb    = self.vocab.conv_ids_to_vecs(list(tok_ids))
+                toks_emb    = torch.vstack([torch.from_numpy(embd) for embd in toks_emb]).unsqueeze(0).to(args.device)
+                toks_mask   = torch.ones((1, len(tok_ids))).to(args.device)
+                # [b=1, seq=*, 200]
 
-                toks_emb = self.ff_ans(toks_emb).transpose(0, 1)
+                toks_emb = self.embd_layer.linear1(toks_emb.float())
+                toks_emb = self.embd_layer.encode_ans(toks_emb, toks_mask).transpose(0, 1)
                 # [seq=*, b=1, d_hid]
 
                 output  = self.decoder(toks_emb, Y)
@@ -74,8 +78,11 @@ class TransDecoder(torch_nn.Module):
             return pred
 
         else:
-            ans     = self.ff_ans(ans).transpose(0, 1)
+            ans     = ans.transpose(0, 1)
             # [seq_len_ans, b, d_hid]
+
+            Y       = Y.transpose(0, 1)
+            # [n_nodes + n_paras*seq_len_para, b, d_hid]
 
             pred    = self.decoder(ans, Y)
             # [seq_len_ans, b, d_hid]

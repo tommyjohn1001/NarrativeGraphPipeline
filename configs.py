@@ -58,7 +58,8 @@ PATH    = {
     'raw_data_dir'      : [
         "/Users/hoangle/Projects/VinAI/_data/NarrativeQA",
         "/home/tommy/Projects/_data/NarrativeQA",
-        "/home/ubuntu/NarrativeQA"
+        "/home/ubuntu/NarrativeQA",
+        "/root/NarrativeQA"
     ],
     'bert'              : [
         "/root/bert-base-uncased",

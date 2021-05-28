@@ -46,9 +46,9 @@ class BertBasedEmbd(torch_nn.Module):
         # Convert ques, paraas and
         # ans to new space
         ###################
-        ques    = self.linear1(ques)
-        paras   = self.linear1(paras)
-        ans     = self.linear1(ans)
+        ques    = self.linear1(ques.float())
+        paras   = self.linear1(paras.float())
+        ans     = self.linear1(ans.float())
         # ques  : [b, seq_len_ques, 768]
         # paras : [b, seq_len_contx, 768]
         # ans   : [b, seq_len_ans, 768]
