@@ -11,7 +11,7 @@ mkdir -p backup
 #     --num_proc 8 \
 #     --n_epochs 60 \
 #     --lr 5e-4 \
-#     --w_decay 0.95 \
+#     --w_decay 0.1 \
 #     --task train \
     # --is_debug True
 

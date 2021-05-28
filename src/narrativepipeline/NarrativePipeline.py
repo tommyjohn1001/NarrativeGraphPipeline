@@ -121,6 +121,20 @@ class Trainer():
             logging.info("=> Saved checkpoint instance existed. Load it.")
         return torch.load(PATH['saved_chkpoint'])
 
+    def calc_loss(self, criterion, pred, ans1_ids, ans2_ids):
+        # pred      : [b, seq_len_ans, d_vocab]
+        # ans1_ids  : [b, seq_len_ans]
+        # ans2_ids  : [b, seq_len_ans]
+
+        pred_flat   = pred[:, :-1, :].reshape(-1, args.d_vocab)
+        ans1_flat   = ans1_ids[:, 1:].reshape(-1)
+        ans2_flat   = ans2_ids[:, 1:].reshape(-1)
+
+        loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
+                      0.3 * criterion(pred_flat, ans2_flat)
+
+        return loss
+
     def train(self, model, dataset_train:CustomDataset, criterion, optimizer, scheduler):
         loss_train  = 0
         nth_batch   = 0
@@ -168,13 +182,8 @@ class Trainer():
 
 
 
-                # pred: [b, seq_len_ans, d_vocab]
-                pred_flat   = pred.view(-1, args.d_vocab)
-                ans1_flat   = ans1_ids.view(-1)
-                ans2_flat   = ans2_ids.view(-1)
-
-                loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
-                              0.3 * criterion(pred_flat, ans2_flat)
+                loss    = self.calc_loss(criterion, pred, ans1_ids, ans2_ids)
+                
                 loss.backward()
 
                 torch_nn.utils.clip_grad_value_(model.parameters(), clip_value=1)
@@ -215,13 +224,9 @@ class Trainer():
 
                     pred        = model(ques, ques_mask, ans1, ans1_mask,
                                         paras, paras_mask, is_inferring=False)
-                    # pred: [batch, seq_len_ans, d_vocab]
-                    pred_flat   = pred.view(-1, args.d_vocab)
-                    ans1_flat   = ans1_ids.view(-1)
-                    ans2_flat   = ans2_ids.view(-1)
+                    # pred: [b, seq_len_ans, d_vocab]
 
-                    loss        = 0.7 * criterion(pred_flat, ans1_flat) +\
-                                  0.3 * criterion(pred_flat, ans2_flat)
+                    loss        = self.calc_loss(criterion, pred, ans1_ids, ans2_ids)
 
                     loss_test   += loss.detach().item()
 
