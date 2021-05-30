@@ -1,10 +1,12 @@
 from typing import Any
 
 from transformers import BertModel
+import transformers
 import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 
+transformers.logging.set_verbosity_error()
 
 class BertEmbedding(torch_nn.Module):
     """Module to embed paragraphs and question using Bert model."""
@@ -32,13 +34,10 @@ class FineGrain(torch_nn.Module):
         n_gru_layers: int = 5,
         d_vocab: int = 32716,
         d_bert: int = 768,
-        path_bert: str = None,
-        device: Any = None
-    ):
+        path_bert: str = None):
         super().__init__()
 
         self.d_bert = d_bert
-        self.device = device
 
         ## Modules for embedding
         self.embd       = torch_nn.Embedding(d_vocab, d_bert)
@@ -129,6 +128,9 @@ class FineGrain(torch_nn.Module):
         # paras     : [b*n_paras, seq_len_para, d_bert]
         # paras_mask: [b*n_paras]
 
+        for i in range(paras_len.shape[0]):
+            if paras_len[i] == 0:
+                paras_len[i] = 1
 
         tmp     = torch_nn.utils.rnn.pack_padded_sequence(paras_, paras_len, batch_first=True,
                                                           enforce_sorted=False)

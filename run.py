@@ -14,7 +14,8 @@ def main(config: DictConfig):
 
     # Imports should be nested inside @hydra.main to optimize tab completion
     # Read more here: https://github.com/facebookresearch/hydra/issues/934
-
+    if "task" in config and config.task == "debug":
+        os.chdir(config.work_dir)
     from src.train import train
     from src.predict import predict
     from src.utils import utils

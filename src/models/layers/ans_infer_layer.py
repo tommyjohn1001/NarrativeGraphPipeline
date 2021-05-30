@@ -45,6 +45,6 @@ class BertDecoder(torch_nn.Module):
         pred    = self.ff(output)
         # [b, seq_len_ans, d_vocab]
 
-        pred    = ans[:, :seq_len, :]
+        pred    = pred[:, :seq_len, :]
 
         return pred

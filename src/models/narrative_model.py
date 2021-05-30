@@ -10,7 +10,7 @@ import torch
 
 from src.datamodules.narrative_datamodule import NarrativeDataModule
 from src.models.layers.reasoning_layer.memorygraph_layer import GraphBasedMemoryLayer
-from src.models.layers.finegrain_layer.finegrain import FineGrain
+from src.models.layers.finegrain_layer import FineGrain
 from src.models.layers.ans_infer_layer import BertDecoder
 from src.models.utils import CustomGen
 
@@ -60,9 +60,9 @@ class NarrativeModel(plt.LightningModule):
         #############################
         # Define model
         #############################
-        self.embd_layer = FineGrain(seq_len_para, n_gru_layers, d_vocab, d_bert, path_bert, self.device)
+        self.embd_layer = FineGrain(seq_len_para, n_gru_layers, d_vocab, d_bert, path_bert)
         self.reasoning  = GraphBasedMemoryLayer(batch_size, seq_len_ques, seq_len_ans, d_hid, d_bert,
-                                                d_graph, n_nodes, n_edges, self.device)
+                                                d_graph, n_nodes, n_edges)
         self.ans_infer  = BertDecoder(seq_len_ans, d_bert, d_vocab, path_bert)
 
 
@@ -128,12 +128,12 @@ class NarrativeModel(plt.LightningModule):
 
 
     def training_step(self, batch: Any, batch_idx: int):
-        ques        = batch['ques'].float()
+        ques        = batch['ques']
         ques_mask   = batch['ques_mask']
-        ans1        = batch['ans1'].float()
+        ans1        = batch['ans1']
         ans1_mask   = batch['ans1_mask']
         ans2        = batch['ans2']
-        paras       = batch['paras'].float()
+        paras       = batch['paras']
         paras_mask  = batch['paras_mask']
 
         pred        = self.model(ques, ques_mask, ans1,
@@ -240,8 +240,7 @@ class NarrativeModel(plt.LightningModule):
             model=self.generate,
             pad_token_id=self.bert_tokenizer.pad_token_id,
             bos_token_id=self.bert_tokenizer.cls_token_id,
-            eos_token_id=self.bert_tokenizer.sep_token_id,
-            device=self.device)
+            eos_token_id=self.bert_tokenizer.sep_token_id)
 
         outputs = generator.beam_sample(None, Y_)
 
@@ -253,7 +252,7 @@ class NarrativeModel(plt.LightningModule):
 
         b_, seq_len = decoder_input_ids.shape
 
-        decoder_input_mask  = torch.ones((b_, seq_len), device=self.device)
+        decoder_input_mask  = torch.ones((b_, seq_len))
         decoder_input_embd  = self.embd_layer.encode_ans(decoder_input_ids,
                                                          decoder_input_mask)
         # [b_, seq=*, d_bert]

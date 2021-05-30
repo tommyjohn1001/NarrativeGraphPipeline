@@ -55,10 +55,10 @@ class NarrativeDataModule(plt.LightningDataModule):
             self.data_train = NarrativeDataset("train", size_dataset=self.sizes_dataset['train'],
                                                size_shard=self.sizes_shard['train'], **dataset_args)
             self.data_valid = NarrativeDataset("valid", size_dataset=self.sizes_dataset['valid'],
-                                               size_shard=self.sizes_shard['train'], **dataset_args)
+                                               size_shard=self.sizes_shard['valid'], **dataset_args)
         else:
             self.data_test  = NarrativeDataset("test", size_dataset=self.sizes_dataset['test'],
-                                               size_shard=self.sizes_shard['train'], **dataset_args)
+                                               size_shard=self.sizes_shard['test'], **dataset_args)
 
     def train_dataloader(self):
         """Return DataLoader for training."""

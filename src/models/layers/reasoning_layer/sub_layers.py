@@ -13,12 +13,9 @@ import numpy as np
 class GraphLayer(torch_nn.Module):
     def __init__(self,
         d_hid: int = 64,
-        d_graph: int = 2048,
-        device: Any = None):
+        d_graph: int = 2048):
 
         super().__init__()
-
-        self.device = device
 
         self.linear = torch_nn.Linear(d_hid*3, d_graph)
 
@@ -98,8 +95,8 @@ class GraphLayer(torch_nn.Module):
             edge_indx_  = edge_indx[b, :, :edge_len[b].item()].squeeze(0)
 
             ## 2.2. Increment index of that edge indx by accum
-            increment   = torch.Tensor([accum]).repeat(edge_indx_.shape).to(self.device)
-            edge_indx_  = edge_indx_ + increment
+            increment   = torch.Tensor([accum]).repeat(edge_indx_.shape)
+            edge_indx_  = edge_indx_ + increment.to(edge_indx_.get_device())
 
             ## 2.3. Concate into 'final_edge_indx'
             if final_edge_indx is None:
@@ -111,8 +108,8 @@ class GraphLayer(torch_nn.Module):
             batch_indx = batch_indx + [b]*(node_len[b].item())
             accum += node_len[b].item()
 
-        return  final_node_feat.to(self.device), final_edge_indx.to(self.device).long(),\
-                torch.LongTensor(batch_indx).to(self.device)
+        return  final_node_feat, final_edge_indx.long(),\
+                torch.LongTensor(batch_indx)
 
 
 class Memory(torch_nn.Module):
@@ -120,8 +117,7 @@ class Memory(torch_nn.Module):
         batch_size: int = 5,
         n_nodes: int = 435,
         d_hid: int = 64,
-        n_edges: int = 3120,
-        device: Any = None):
+        n_edges: int = 3120):
 
         super().__init__()
 
@@ -129,18 +125,13 @@ class Memory(torch_nn.Module):
         self.n_nodes    = n_nodes
         self.d_hid      = d_hid
         self.n_edges    = n_edges
-        self.device     = device
 
-        self.edge_len   = torch.IntTensor([n_edges], device=device).repeat(self.batch)
+        self.edge_len   = torch.IntTensor([n_edges]).repeat(self.batch)
 
 
-        #     tmp = torch.load(path_memory)
-        #     self.node_feats_mem = tmp['node_feats_mem'].to(device)
-        #     self.edge_index     = tmp['edge_index'].to(device)
-        # else:
         ## If load_statedict occurs, it will automatically load the following attributes
-        self.node_feats_mem = Parameter(torch.rand(self.batch, self.n_nodes, self.d_hid, device=device), requires_grad=False)
-        self.edge_index     = Parameter(self.gen_edges().to(device), requires_grad=False)
+        self.node_feats_mem = Parameter(torch.rand(self.batch, self.n_nodes, self.d_hid), requires_grad=False)
+        self.edge_index     = Parameter(self.gen_edges(), requires_grad=False)
 
 
     def forward(self):
@@ -160,7 +151,7 @@ class Memory(torch_nn.Module):
         # Y: [batch, n_nodes, d_hid]
 
         ## TODO: In case the result not good, add forgeting layer with sigmoid activation here
-        self.node_feats_mem = torch.nn.parameter.Parameter(Y.detach(), requires_grad=False).to(self.device)
+        self.node_feats_mem = torch.nn.parameter.Parameter(Y.detach(), requires_grad=False)
 
     def gen_edges(self):
         edge_pair   = list(combinations(range(435), 2))

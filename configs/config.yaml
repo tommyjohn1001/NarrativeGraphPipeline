@@ -47,7 +47,7 @@ ignore_warnings: True
 PATH:
   bert      : ${data_dir}/bert-base-uncased
   vocab     : ${data_dir}/vocab.txt
-  data      : ${data_dir}/data_[SPLIT].parquet
+  data      : ${data_dir}/[SPLIT]/data_[SHARD].csv
   pred      : ${data_dir}/prediction.json
   checkpoint: ${work_dir}/logs/last_best/last.ckpt
 

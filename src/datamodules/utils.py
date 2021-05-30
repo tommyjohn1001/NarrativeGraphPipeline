@@ -126,16 +126,14 @@ class NarrativeDataset(Dataset):
         }
 
     def _get_context(self, En, Hn):
+        n_samples = min((len(En), self.n_paras))
         if self.split == "train":
-            selects_Hn  = int(self.n_paras * self.exchange_rate)
-            selects_En  = self.n_paras - selects_Hn
+            selects_Hn  = int(n_samples * self.exchange_rate)
+            selects_En  = n_samples - selects_Hn
 
-            selects_Hn  = sample(len(Hn), selects_Hn)
-            selects_En  = sample(len(En), selects_En)
-            return [En[i] for i in selects_En] + [Hn[i] for i in selects_Hn]
+            return sample(En, selects_En) + sample(Hn, selects_Hn)
 
-        selects_Hn  = sample(len(Hn), self.n_paras)
-        return [Hn[i] for i in selects_Hn]
+        return sample(Hn, n_samples)
 
 
     def f_process_file_multi(self, entries, queue):
@@ -223,7 +221,7 @@ class NarrativeDataset(Dataset):
             entries = ParallelHelper(self.f_process_file_multi, df, lambda dat, l, h: dat.iloc[l:h],
                                     self.num_workers).launch()
         else:
-            entries = list(map(self.f_process_file_single, tqdm(df.itertuples(), total=len(df), desc=os.path.basename(path_file))))
+            entries = list(map(self.f_process_file_single, df.itertuples()))
 
         for entry in entries:
             # self.docId.append(entry['docId'])

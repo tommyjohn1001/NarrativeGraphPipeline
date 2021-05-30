@@ -16,8 +16,7 @@ class GraphBasedMemoryLayer(torch_nn.Module):
         d_bert: int = 768,
         d_graph: int = 2048,
         n_nodes: int = 435,
-        n_edges: int = 3120,
-        device: Any = None
+        n_edges: int = 3120
     ):
         super().__init__()
 
@@ -27,8 +26,8 @@ class GraphBasedMemoryLayer(torch_nn.Module):
 
         self.lin1       = torch_nn.Linear(d_bert*2, d_hid, bias=False)
 
-        self.graph      = GraphLayer(d_hid, d_graph, device)
-        self.memory     = Memory(batch_size, n_nodes, d_hid, n_edges, device)
+        self.graph      = GraphLayer(d_hid, d_graph)
+        self.memory     = Memory(batch_size, n_nodes, d_hid, n_edges)
 
         self.lin2       = torch_nn.Linear(d_bert, seq_len_ans, bias=False)
         self.lin3       = torch_nn.Linear(seq_len_ques, n_nodes, bias=False)

@@ -13,8 +13,7 @@ class CustomGen(GenerationMixin):
         model: Any = None,
         pad_token_id: Optional[int] = 0,
         bos_token_id: Optional[int] = 1,
-        eos_token_id: Optional[int] = 2,
-        device: Any = 'cpu') -> None:
+        eos_token_id: Optional[int] = 2) -> None:
         super().__init__()
 
         self.batch_size     = batch_size
@@ -23,7 +22,6 @@ class CustomGen(GenerationMixin):
         self.pad_token_id   = pad_token_id
         self.bos_token_id   = bos_token_id
         self.eos_token_id   = eos_token_id
-        self.device         = device
 
 
         self.model  = model
@@ -35,7 +33,6 @@ class CustomGen(GenerationMixin):
             batch_size=batch_size,
             max_length=max_length,
             num_beams=num_beams,
-            device=device,
             do_early_stopping=False
         )
 
@@ -113,11 +110,11 @@ class CustomGen(GenerationMixin):
 
         if input_ids is None:
             # init `input_ids` with bos_token_id
-            input_ids = torch.ones((batch_size * num_beams, 1), dtype=torch.long, device=self.device) * self.bos_token_id
+            input_ids = torch.ones((batch_size * num_beams, 1), dtype=torch.long) * self.bos_token_id
 
         batch_beam_size, cur_len = input_ids.shape
 
-        beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=input_ids.device)
+        beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float)
         beam_scores = beam_scores.view((batch_size * num_beams,))
 
         while cur_len < self.max_length:
