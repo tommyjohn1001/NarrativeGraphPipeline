@@ -1,0 +1,91 @@
+# @package _global_
+
+
+defaults:
+  - override /trainer: null # override trainer to null so it's not loaded from main config defaults...
+  - override /model: null
+  - override /datamodule: null
+  - override /callbacks: null
+  - override /logger: null
+
+override /PATH: null
+
+task: predict
+
+seed: 307
+
+trainer:
+  _target_: pytorch_lightning.Trainer
+
+  gpus                  : 0
+  min_epochs            : 1
+  max_epochs            : 1
+  auto_lr_find          : False
+  terminate_on_nan      : true
+  auto_scale_batch_size : False
+
+  weights_summary           : null
+  progress_bar_refresh_rate : 10
+  resume_from_checkpoint    : ${PATH.checkpoint}
+
+model:
+  _target_: src.models.narrative_model.NarrativeModel
+
+  batch_size  : ${batch_size}
+  seq_len_ques: 42
+  seq_len_para: 122
+  seq_len_ans : 42
+  n_nodes     : 435
+  n_edges     : 3120
+  n_gru_layers: 5
+  max_len_ans : 12
+  d_hid       : 64
+  d_bert      : 768
+  d_vocab     : 32716
+  d_graph     : 2048
+  lr          : 5e-4
+  w_decay     : 0.0005
+  beam_size   : 20
+  n_gram_beam : 8
+  temperature : 1.4
+  topP        : 0.5
+
+  path_bert   : ${PATH.bert}
+  path_vocab  : ${PATH.vocab}
+  path_pred   : ${PATH.pred}
+
+datamodule:
+  _target_    : src.datamodules.narrative_datamodule.NarrativeDataModule
+
+  batch_size  : ${batch_size}
+  num_workers : ${num_workers}
+  seq_len_ques: 42
+  seq_len_para: 122
+  seq_len_ans : 42
+  sizes_dataset:
+    train : 32744
+    test  : 10552
+    valid : 3456
+  sizes_shard:
+    train : 4093
+    test  : 1319
+    valid : 432
+
+  path_vocab  : ${PATH.vocab}
+  path_data   : ${PATH.data}
+
+callbacks:
+  model_checkpoint:
+    _target_  : pytorch_lightning.callbacks.ModelCheckpoint
+    monitor   : "valid/loss"
+    save_top_k: 2
+    save_last : True
+    mode      : "min"
+    dirpath   : "checkpoints/"
+    filename  : "simple_decoder-{epoch:02d}"
+
+  early_stopping:
+    _target_  : pytorch_lightning.callbacks.EarlyStopping
+    monitor   : "valid/loss"
+    patience  : 10
+    mode      : "min"

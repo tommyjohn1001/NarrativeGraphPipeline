@@ -2,6 +2,14 @@
 
 ### This file contains changes and modifications during developing.
 
+## May 30 2021, 14:40
+- Huge improvements: Use **Pytorch Lightning** and *template*
+- Add new attentive strategy for *Finegrain*
+- Modify module *Memory*
+- Apply *BeamSearch* modified from *huggingface* implementation
+- Discard *GloVe*
+- Replace class *Vocab* by *modified BertTokenizer*
+
 ## May 20 2021, 22:27
 - Change code folder name from 'modules' to 'src'
 - Add new graph-based memory architecture *MemoryGraph* for reasoning
