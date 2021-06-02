@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## June 2 2021, 21:30
+- Move all project to **PyLightning + Hydra template**
+- Use new decoder modified from *hugginface* Bert implementation
+- Apply new CoAttention masking for *Memory*
+- Apply *CustomSampler* for *DataModule*
+
 ## May 17 2021, 15:57
 - Attention mask in module *MemoryBased* is *Linear* module now instead of a tensor.
 - Fix error in module *DataReading*

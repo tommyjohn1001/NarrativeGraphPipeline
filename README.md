@@ -12,7 +12,7 @@ I recommend using **conda**. To install conda environment, run the following:
 ## 2. How to run
 Run the following:
 
-> bash launcher.sh
+> python run.py
 
 ## 3. Components
 
