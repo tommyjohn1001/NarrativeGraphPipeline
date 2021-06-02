@@ -125,17 +125,18 @@ class FineGrain(torch_nn.Module):
 
         paras_      = paras.reshape(-1, seq_len_para, self.d_bert)
         paras_len   = torch.sum(paras_mask, dim=2).reshape(-1).to('cpu')
-        # paras     : [b*n_paras, seq_len_para, d_bert]
+        # paras_    : [b*n_paras, seq_len_para, d_bert]
         # paras_mask: [b*n_paras]
 
-        for i in range(paras_len.shape[0]):
-            if paras_len[i] == 0:
-                paras_len[i] = 1
+        # for i in range(paras_len.shape[0]):
+        #     if paras_len[i] == 0:
+        #         paras_len[i] = 1
 
-        tmp     = torch_nn.utils.rnn.pack_padded_sequence(paras_, paras_len, batch_first=True,
-                                                          enforce_sorted=False)
-        tmp     = self.biGRU_mask(tmp)[0]
-        paras_  = torch_nn.utils.rnn.pad_packed_sequence(tmp, batch_first=True)[0]
+        # tmp     = torch_nn.utils.rnn.pack_padded_sequence(paras_, paras_len, batch_first=True,
+        #                                                   enforce_sorted=False)
+        # tmp     = self.biGRU_mask(tmp)[0]
+        # paras_  = torch_nn.utils.rnn.pad_packed_sequence(tmp, batch_first=True)[0]
+        paras_    = self.biGRU_mask(paras_)[0]
         # [b*n_paras, seq_len_para, d_bert]
 
         paras_first = paras_[:, 0, :].reshape(b, n_paras, -1)

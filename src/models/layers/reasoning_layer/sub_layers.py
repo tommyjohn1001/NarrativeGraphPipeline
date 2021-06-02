@@ -13,7 +13,8 @@ import numpy as np
 class GraphLayer(torch_nn.Module):
     def __init__(self,
         d_hid: int = 64,
-        d_graph: int = 2048):
+        d_graph: int = 2048,
+        n_nodes: int = 435):
 
         super().__init__()
 
@@ -25,6 +26,7 @@ class GraphLayer(torch_nn.Module):
         self.gcn3           = torch_g_nn.GCNConv(d_graph//2, d_graph//2)
         self.gcn4           = torch_g_nn.GCNConv(d_graph//2, d_graph//4)
         self.act_leakRelu   = torch_nn.LeakyReLU(inplace=True)
+        self.batchnorm      = torch_nn.BatchNorm1d(n_nodes)
 
         self.linear2        = torch_nn.Linear(d_graph//4, d_hid, bias=False)
 
@@ -62,6 +64,7 @@ class GraphLayer(torch_nn.Module):
 
         X   = self.linear2(X).view(b, n_nodes, d_hid)
         # [b, n_nodes, d_hid]
+        X   = self.batchnorm(X)
 
         return X
 

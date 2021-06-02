@@ -48,11 +48,12 @@ PATH:
   bert      : ${data_dir}/bert-base-uncased
   vocab     : ${data_dir}/vocab.txt
   data      : ${data_dir}/[SPLIT]/data_[SHARD].csv
+  train_pred: ${data_dir}/train_prediction.json
   pred      : ${data_dir}/prediction.json
   checkpoint: ${work_dir}/logs/last_best/last.ckpt
 
 #############################################################
 ### THIS SECTION IS FOR VERY GENERAL CONFIGURATIONS
 #############################################################
-batch_size  : 5
-num_workers : 4
+batch_size  : 8
+num_workers : 8

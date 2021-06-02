@@ -53,6 +53,7 @@ model:
   path_bert   : ${PATH.bert}
   path_vocab  : ${PATH.vocab}
   path_pred   : ${PATH.pred}
+  path_train_pred: ${PATH.train_pred}
 
 datamodule:
   _target_    : src.datamodules.narrative_datamodule.NarrativeDataModule

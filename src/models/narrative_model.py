@@ -5,6 +5,7 @@ import json
 from transformers import AdamW, BertTokenizer
 from transformers.modeling_outputs import Seq2SeqLMOutput
 import pytorch_lightning as plt
+import torch.nn.functional as torch_F
 import torch.nn as torch_nn
 import torch
 
@@ -37,6 +38,7 @@ class NarrativeModel(plt.LightningModule):
         path_bert: str = None,
         path_vocab: str = None,
         path_pred: str = None,
+        path_train_pred: str = None,
         datamodule: NarrativeDataModule = None):
 
         super().__init__()
@@ -55,14 +57,15 @@ class NarrativeModel(plt.LightningModule):
         self.bert_tokenizer = BertTokenizer(vocab_file=path_vocab)
         self.datamodule     = datamodule
 
-        self.path_pred = path_pred
+        self.path_pred          = path_pred
+        self.path_train_pred    = path_train_pred
 
         #############################
         # Define model
         #############################
         self.embd_layer = FineGrain(seq_len_para, n_gru_layers, d_vocab, d_bert, path_bert)
-        self.reasoning  = GraphBasedMemoryLayer(batch_size, seq_len_ques, seq_len_ans, d_hid, d_bert,
-                                                d_graph, n_nodes, n_edges)
+        self.reasoning  = GraphBasedMemoryLayer(batch_size, seq_len_ques, seq_len_ans,
+                                                d_hid, d_bert, d_graph, n_nodes, n_edges)
         self.ans_infer  = BertDecoder(seq_len_ans, d_bert, d_vocab, path_bert)
 
 
@@ -143,7 +146,32 @@ class NarrativeModel(plt.LightningModule):
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
-        return loss
+        # if loss.isnan().any():
+        #     torch.save({
+        #         'ques'        : batch['ques'],
+        #         'ques_mask'   : batch['ques_mask'],
+        #         'ans1'        : batch['ans1'],
+        #         'ans1_mask'   : batch['ans1_mask'],
+        #         'ans2'        : batch['ans2'],
+        #         'paras'       : batch['paras'],
+        #         'paras_mask'  : batch['paras_mask']
+        #     }, "cur_nan.pt")
+
+        _, prediction = torch.topk(torch_F.log_softmax(pred, dim=2), 1, dim=2)
+
+        prediction  = [
+            {
+                "pred"  : ' '.join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
+                "ans1"  : ' '.join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
+                "ans2"  : ' '.join(self.bert_tokenizer.convert_ids_to_tokens(ans2_))
+            } for pred_, ans1_, ans2_ in zip(prediction, ans1, ans2)
+        ]
+
+        return {'loss': loss, 'pred': prediction}
+
+    def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int, dataloader_idx: int) -> None:
+        with open(self.path_train_pred, 'a+') as pred_file:
+            json.dump(outputs['pred'], pred_file, indent=2, ensure_ascii=False)
 
     def test_step(self, batch: Any, batch_idx: int):
         ques        = batch['ques']
@@ -191,10 +219,7 @@ class NarrativeModel(plt.LightningModule):
             "lr_scheduler"  : torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=15, eta_min=0)
         }
 
-    def on_train_batch_end(self, outputs: Optional[Any], batch: Any, batch_idx: int, dataloader_idx: int) -> None:
-        torch_nn.utils.clip_grad_value_(self.parameters(), clip_value=1)
-
-    def on_train_epoch_end(self, unused: Optional[None]) -> None:
+    def on_train_epoch_end(self) -> None:
         if self.current_epoch % 5 == 0:
             self.datamodule.switch_answerability()
 
