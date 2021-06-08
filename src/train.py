@@ -38,7 +38,7 @@ def train(config: DictConfig) -> Optional[float]:
 
     # Init Lightning model
     log.info(f"Instantiating model <{config.model._target_}>")
-    model_kwargs = {'datamodule': datamodule}
+    model_kwargs = {"datamodule": datamodule}
     model: LightningModule = hydra.utils.instantiate(config.model, **model_kwargs)
 
     # Init Lightning callbacks
@@ -61,6 +61,7 @@ def train(config: DictConfig) -> Optional[float]:
     log.info(f"Instantiating trainer <{config.trainer._target_}>")
 
     ## Check if checkpoint path is specified
+    path_resume = config.trainer.resume_from_checkpoint
     if not os.path.isfile(config.trainer.resume_from_checkpoint):
         log.info("=> No previous checkpoint specified/found. Start fresh training.")
         config.trainer.resume_from_checkpoint = None
@@ -106,9 +107,9 @@ def train(config: DictConfig) -> Optional[float]:
     # Print path to best checkpoint and back it up
     log.info(f"Best checkpoint path:\n{trainer.checkpoint_callback.best_model_path}")
     ## Create folder storing best checkpoints
-    os.makedirs(os.path.dirname(config.trainer.resume_from_checkpoint), exist_ok=True)
+    os.makedirs(os.path.dirname(path_resume), exist_ok=True)
     if os.path.exists(trainer.checkpoint_callback.best_model_path):
-        shutil.copy(trainer.checkpoint_callback.best_model_path, config.trainer.resume_from_checkpoint)
+        shutil.copy(trainer.checkpoint_callback.best_model_path, path_resume)
 
     # Return metric score for hyperparameter optimization
     optimized_metric = config.get("optimized_metric")

@@ -25,7 +25,7 @@ trainer:
 
   gpus                  : 1
   min_epochs            : 1
-  max_epochs            : 10
+  max_epochs            : 40
   auto_lr_find          : False
   terminate_on_nan      : true
   auto_scale_batch_size : False
@@ -33,6 +33,7 @@ trainer:
   weights_summary           : null
   progress_bar_refresh_rate : 10
   resume_from_checkpoint    : ${PATH.checkpoint}
+  check_val_every_n_epoch: 5
 
 model:
   _target_: src.models.narrative_model.NarrativeModel
@@ -49,7 +50,7 @@ model:
   d_bert      : 768
   d_vocab     : 32716
   d_graph     : 2048
-  lr          : 5e-4
+  lr          : 1e-4
   w_decay     : 0.0005
   beam_size   : 20
   n_gram_beam : 8
@@ -89,7 +90,7 @@ callbacks:
     save_last : True
     mode      : "min"
     dirpath   : "checkpoints/"
-    filename  : "simple_decoder-{epoch:02d}"
+    filename  : "narrative_graph-{epoch:02d}"
 
   early_stopping:
     _target_  : pytorch_lightning.callbacks.EarlyStopping

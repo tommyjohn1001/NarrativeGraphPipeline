@@ -29,7 +29,7 @@ class NarrativeModel(plt.LightningModule):
         d_bert: int = 768,
         d_vocab: int = 32716,
         d_graph: int = 2048,
-        lr: float = 5e-4,
+        lr: float = 1e-4,
         w_decay: float = 0.0005,
         beam_size: int = 20,
         n_gram_beam: int = 5,
@@ -79,19 +79,16 @@ class NarrativeModel(plt.LightningModule):
     # FOR TRAINING PURPOSE
     ####################################################################
 
-    def calc_loss(self, pred, ans1, ans2):
+    def calc_loss(self, pred, ans):
         # pred: [b, seq_len_ans, d_vocab]
-        # ans1: [b, seq_len_ans]
-        # ans2: [b, seq_len_ans]
+        # ans : [b, seq_len_ans]]
 
         d_vocab     = pred.shape[2]
 
         pred_flat   = pred[:, :-1, :].reshape(-1, d_vocab)
-        ans1_flat   = ans1[:, 1:].reshape(-1)
-        ans2_flat   = ans2[:, 1:].reshape(-1)
+        ans_flat    = ans[:, 1:].reshape(-1)
 
-        loss        = 0.7 * self.criterion(pred_flat, ans1_flat) +\
-                      0.3 * self.criterion(pred_flat, ans2_flat)
+        loss        = self.criterion(pred_flat, ans_flat)
 
         return loss
 
@@ -134,28 +131,17 @@ class NarrativeModel(plt.LightningModule):
         ques        = batch['ques']
         ques_mask   = batch['ques_mask']
         ans1        = batch['ans1']
-        ans1_mask   = batch['ans1_mask']
         ans2        = batch['ans2']
+        ans2_mask   = batch['ans2_mask']
         paras       = batch['paras']
         paras_mask  = batch['paras_mask']
 
-        pred        = self.model(ques, ques_mask, ans1,
-                                        ans1_mask, paras, paras_mask)
+        pred        = self.model(ques, ques_mask, ans2,
+                                 ans2_mask, paras, paras_mask)
 
-        loss        = self.calc_loss(pred, ans1, ans2)
+        loss        = self.calc_loss(pred, ans2)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
-
-        # if loss.isnan().any():
-        #     torch.save({
-        #         'ques'        : batch['ques'],
-        #         'ques_mask'   : batch['ques_mask'],
-        #         'ans1'        : batch['ans1'],
-        #         'ans1_mask'   : batch['ans1_mask'],
-        #         'ans2'        : batch['ans2'],
-        #         'paras'       : batch['paras'],
-        #         'paras_mask'  : batch['paras_mask']
-        #     }, "cur_nan.pt")
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=2), 1, dim=2)
 
@@ -177,16 +163,16 @@ class NarrativeModel(plt.LightningModule):
         ques        = batch['ques']
         ques_mask   = batch['ques_mask']
         ans1        = batch['ans1']
-        ans1_mask   = batch['ans1_mask']
         ans2        = batch['ans2']
+        ans2_mask   = batch['ans2_mask']
         paras       = batch['paras']
         paras_mask  = batch['paras_mask']
 
-        pred        = self.model(ques, ques_mask, ans1,
-                                 ans1_mask, paras, paras_mask)
+        pred        = self.model(ques, ques_mask, ans2,
+                                 ans2_mask, paras, paras_mask)
         # pred: [b, seq_len_ans, d_vocab]
 
-        loss        = self.calc_loss(pred, ans1, ans2)
+        loss        = self.calc_loss(pred, ans2)
 
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -196,16 +182,16 @@ class NarrativeModel(plt.LightningModule):
         ques        = batch['ques']
         ques_mask   = batch['ques_mask']
         ans1        = batch['ans1']
-        ans1_mask   = batch['ans1_mask']
         ans2        = batch['ans2']
+        ans2_mask   = batch['ans2_mask']
         paras       = batch['paras']
         paras_mask  = batch['paras_mask']
 
-        pred        = self.model(ques, ques_mask, ans1,
-                                 ans1_mask, paras, paras_mask)
+        pred        = self.model(ques, ques_mask, ans2,
+                                 ans2_mask, paras, paras_mask)
         # pred: [b, seq_len_ans, d_vocab]
 
-        loss        = self.calc_loss(pred, ans1, ans2)
+        loss        = self.calc_loss(pred, ans2)
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -220,7 +206,7 @@ class NarrativeModel(plt.LightningModule):
         }
 
     def on_train_epoch_end(self) -> None:
-        if self.current_epoch % 5 == 0:
+        if self.current_epoch % 5 == 0 and self.current_epoch != 0:
             self.datamodule.switch_answerability()
 
     #########################################
@@ -292,14 +278,13 @@ class NarrativeModel(plt.LightningModule):
         ques        = batch['ques']
         ques_mask   = batch['ques_mask']
         ans1        = batch['ans1']
-        ans1_mask   = batch['ans1_mask']
         ans2        = batch['ans2']
+        ans2_mask   = batch['ans2_mask']
         paras       = batch['paras']
         paras_mask  = batch['paras_mask']
 
-
-        pred        = self(ques, ques_mask, ans1,
-                           ans1_mask, paras, paras_mask)
+        pred        = self.model(ques, ques_mask, ans2,
+                                 ans2_mask, paras, paras_mask)
 
         prediction  = [
             {
