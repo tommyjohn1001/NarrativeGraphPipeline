@@ -28,7 +28,7 @@ class NarrativeModel(plt.LightningModule):
         d_hid: int = 64,
         d_bert: int = 768,
         d_vocab: int = 32716,
-        lr: float = 5e-4,
+        lr: float = 2e-4,
         w_decay: float = 0.0005,
         beam_size: int = 20,
         n_gram_beam: int = 5,
@@ -192,6 +192,8 @@ class NarrativeModel(plt.LightningModule):
         pred        = self.model(ques, ques_mask, ans2, ans2_mask, paras, paras_mask)
 
         loss        = self.calc_loss(pred, ans2)
+
+        self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=2), 1, dim=2)
 
