@@ -2,7 +2,7 @@ _target_: src.models.narrative_model.NarrativeModel
 
 batch_size: ${batch_size}
 seq_len_ques: 42
-seq_len_para: 182
+seq_len_para: 162
 seq_len_ans: 42
 n_nodes: 435
 n_edges: 3120
@@ -21,6 +21,5 @@ temperature: 1.4
 topP: 0.5
 
 path_bert: ${PATH.bert}
-path_vocab: ${PATH.vocab}
 path_pred: ${PATH.pred}
 path_train_pred: ${PATH.train_pred}

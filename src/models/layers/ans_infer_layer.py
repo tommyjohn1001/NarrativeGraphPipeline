@@ -18,6 +18,8 @@ class BertDecoder(torch_nn.Module):
         bert_conf = BertConfig()
         bert_conf.is_decoder = True
         bert_conf.add_cross_attention = True
+        bert_conf.num_attention_heads = 6
+        bert_conf.num_hidden_layers = 6
         # NOTE: This is the difference with Thong's model: Thong loads from pretrain and freeze while I dont load and train
         self.decoder = BertModel(config=bert_conf)
 
@@ -39,7 +41,7 @@ class BertDecoder(torch_nn.Module):
         ans_mask = torch_f.pad(ans_mask, (0, self.seq_len_ans - seq_len), "constant", 0)
 
         output = self.decoder(
-            input_ids=ans, attention_mask=ans_mask, encoder_hidden_states=Y
+            inputs_embeds=ans, attention_mask=ans_mask, encoder_hidden_states=Y
         )[0]
         # [b, seq_len_ans, 768]
 

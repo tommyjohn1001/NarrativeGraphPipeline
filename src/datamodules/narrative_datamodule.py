@@ -2,6 +2,7 @@ from torch.utils.data import DataLoader
 import pytorch_lightning as plt
 
 from src.datamodules.utils import NarrativeDataset, CustomSampler
+
 from src.datamodules.preprocess import Preprocess
 
 
@@ -17,7 +18,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         batch_size: int = 5,
         seq_len_ques: int = 42,
         len_para_processing: int = 120,
-        seq_len_para: int = 182,
+        seq_len_para: int = 162,
         seq_len_ans: int = 42,
         n_paras: int = 30,
         num_workers: int = 4,

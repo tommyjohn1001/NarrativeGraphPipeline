@@ -3,7 +3,7 @@ _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
 batch_size: ${batch_size}
 num_workers: ${num_workers}
 seq_len_ques: 42
-seq_len_para: 182
+seq_len_para: 162
 len_para_processing: 120
 seq_len_ans: 42
 sizes_dataset:
@@ -15,7 +15,7 @@ sizes_shard:
   test: 1319
   valid: 432
 
-path_bert: ${PATH.vocab}
+path_bert: ${PATH.bert}
 path_data: ${PATH.data}
 path_raw_data: ${PATH.raw_data}
 path_processed_contx: ${PATH.processed_contx}

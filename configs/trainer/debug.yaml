@@ -7,7 +7,7 @@ max_epochs: 2
 
 # prints
 progress_bar_refresh_rate: null
-weights_summary: null
+weights_summary: "top"
 profiler: null
 
 # debugs

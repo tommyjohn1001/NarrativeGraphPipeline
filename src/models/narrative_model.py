@@ -27,7 +27,7 @@ class NarrativeModel(plt.LightningModule):
         self,
         batch_size: int,
         seq_len_ques: int = 42,
-        seq_len_para: int = 182,
+        seq_len_para: int = 162,
         seq_len_ans: int = 42,
         n_nodes: int = 435,
         n_edges: int = 3120,
@@ -45,7 +45,6 @@ class NarrativeModel(plt.LightningModule):
         temperature: int = 1,
         topP: float = 0.5,
         path_bert: str = None,
-        path_vocab: str = None,
         path_pred: str = None,
         path_train_pred: str = None,
         datamodule: NarrativeDataModule = None,
@@ -63,7 +62,7 @@ class NarrativeModel(plt.LightningModule):
         self.max_len_ans = max_len_ans
         self.switch_frequency = switch_frequency
 
-        self.bert_tokenizer = BertTokenizer(vocab_file=path_vocab)
+        self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
         self.datamodule = datamodule
 
         self.path_pred = path_pred
@@ -95,12 +94,13 @@ class NarrativeModel(plt.LightningModule):
         )
 
         ## Freeeze some parameters
-        list_freeze_params = [
-            self.embd_layer.embedding.parameters(),
-            self.ans_infer.decoder.parameters(),
+        list_freeze_sets = [
+            self.embd_layer.bert_emb.parameters(),
+            # self.ans_infer.decoder.parameters(),
         ]
-        for param in list_freeze_params:
-            param.requires_grad = True
+        for params in list_freeze_sets:
+            for param in params:
+                param.requires_grad = True
 
         #############################
         # Define things
@@ -391,17 +391,17 @@ class NarrativeModel(plt.LightningModule):
         return Seq2SeqLMOutput(logits=output)
 
     def predict_step(
-        self, batch: Any, batch_idx: int, dataloader_idx: Optional[int]
+        self,
+        batch: Any,
+        batch_idx: int,
+        dataloader_idx: Optional[int],
     ) -> Any:
         ques = batch["ques"]
         ques_mask = batch["ques_mask"]
-        ans1 = batch["ans1"]
-        ans2 = batch["ans2"]
-        ans2_mask = batch["ans2_mask"]
         paras = batch["paras"]
         paras_mask = batch["paras_mask"]
 
-        pred = self.model(ques, ques_mask, ans2, ans2_mask, paras, paras_mask)
+        pred = self(ques, ques_mask, paras, paras_mask)
 
         prediction = [
             {

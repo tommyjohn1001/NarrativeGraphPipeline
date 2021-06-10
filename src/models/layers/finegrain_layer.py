@@ -12,7 +12,7 @@ class FineGrain(torch_nn.Module):
 
     def __init__(
         self,
-        seq_len_para: int = 182,
+        seq_len_para: int = 162,
         n_gru_layers: int = 5,
         d_bert: int = 768,
         path_bert: str = None,
@@ -56,7 +56,7 @@ class FineGrain(torch_nn.Module):
 
         b, n_paras, seq_len_para = paras.shape
 
-        ques = self.bert_emb(ques, ques_mask)[0]
+        ques = self.bert_emb(input_ids=ques, attention_mask=ques_mask)[0]
         # ques  : [b, seq_len_ques, d_bert]
 
         #########################
@@ -66,13 +66,13 @@ class FineGrain(torch_nn.Module):
         paragraphs = []
 
         for ith in range(n_paras):
-            para = paras[:, ith, :, :]
+            para = paras[:, ith, :]
             para_mask = paras_mask[:, ith, :]
 
             ###################
             # Embed context
             ###################
-            L_s = self.bert_emb(para, para_mask)[0]
+            L_s = self.bert_emb(input_ids=para, attention_mask=para_mask)[0]
             # L_s: [b, seq_len_para, d_bert]
 
             ###################
@@ -144,5 +144,5 @@ class FineGrain(torch_nn.Module):
         # ans           : [b, seq_len_ans]
         # ans_mask      : [b, seq_len_ans]
 
-        return self.bert_emb(ans, ans_mask)[0]
+        return self.bert_emb(input_ids=ans, attention_mask=ans_mask)[0]
         # [b, seq_len_ans, d_bert]

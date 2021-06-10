@@ -16,14 +16,14 @@ seed: 307
 trainer:
   _target_: pytorch_lightning.Trainer
 
-  gpus: 1
+  gpus: -1
   min_epochs: 1
   max_epochs: 1
   auto_lr_find: False
   terminate_on_nan: true
   auto_scale_batch_size: False
 
-  weights_summary: null
+  weights_summary: "top"
   progress_bar_refresh_rate: 10
   resume_from_checkpoint: ${PATH.checkpoint}
 
@@ -32,7 +32,7 @@ model:
 
   batch_size: ${batch_size}
   seq_len_ques: 42
-  seq_len_para: 182
+  seq_len_para: 162
   seq_len_ans: 42
   n_nodes: 435
   n_edges: 3120
@@ -50,7 +50,6 @@ model:
   topP: 0.5
 
   path_bert: ${PATH.bert}
-  path_vocab: ${PATH.vocab}
   path_pred: ${PATH.pred}
   path_train_pred: ${PATH.train_pred}
 
@@ -60,7 +59,8 @@ datamodule:
   batch_size: ${batch_size}
   num_workers: ${num_workers}
   seq_len_ques: 42
-  seq_len_para: 182
+  seq_len_para: 162
+  len_para_processing: 120
   seq_len_ans: 42
   sizes_dataset:
     train: 32744
@@ -71,7 +71,7 @@ datamodule:
     test: 1319
     valid: 432
 
-  path_bert: ${PATH.vocab}
+  path_bert: ${PATH.bert}
   path_data: ${PATH.data}
   path_raw_data: ${PATH.raw_data}
   path_processed_contx: ${PATH.processed_contx}
