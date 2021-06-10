@@ -50,9 +50,9 @@ class CustomSampler(Sampler[int]):
             self.indices.extend(indices)
 
 
-class CustomBertTokenizer(BertTokenizer):
-    def _tokenize(self, text: str):
-        return text.split(" ")
+# class CustomBertTokenizer(BertTokenizer):
+#     def _tokenize(self, text: str):
+#         return text.split(" ")
 
 
 class NarrativeDataset(Dataset):
@@ -60,11 +60,11 @@ class NarrativeDataset(Dataset):
         self,
         split: str,
         path_data: str,
-        path_vocab: str,
+        path_bert: str,
         size_dataset: int,
         size_shard: int,
         seq_len_ques: int = 42,
-        seq_len_para: int = 122,
+        seq_len_para: int = 182,
         seq_len_ans: int = 42,
         n_paras: int = 30,
         num_worker: int = 1,
@@ -82,7 +82,9 @@ class NarrativeDataset(Dataset):
         path_data = path_data.replace("[SPLIT]", split).replace("[SHARD]", "*")
         self.paths = sorted(glob.glob(path_data))
 
-        self.tokenizer = CustomBertTokenizer(path_vocab)
+        ## NOTE: Instead of own vocab, BERT vocab is used
+        # self.tokenizer = CustomBertTokenizer(path_vocab)
+        self.tokenizer = BertTokenizer.from_pretrained(path_bert)
 
         self.curent_ith_file = -1
 
@@ -90,7 +92,7 @@ class NarrativeDataset(Dataset):
         self.ques_mask = None
         self.ans1 = None
         self.ans2 = None
-        # self.ans1_mask      = None
+        self.ans1_mask = None
         self.ans2_mask = None
         self.paras = None
         self.paras_mask = None
@@ -122,7 +124,7 @@ class NarrativeDataset(Dataset):
             "ques_mask": self.ques_mask[indx],
             "ans1": self.ans1[indx],
             "ans2": self.ans2[indx],
-            # 'ans1_mask'     : self.ans1_mask[indx],
+            "ans1_mask": self.ans1_mask[indx],
             "ans2_mask": self.ans2_mask[indx],
             "paras": self.paras[indx],
             "paras_mask": self.paras_mask[indx],
@@ -150,6 +152,7 @@ class NarrativeDataset(Dataset):
             entry.question,
             padding="max_length",
             max_length=self.seq_len_ques,
+            truncation=True,
             return_tensors="np",
             return_token_type_ids=False,
         )
@@ -170,16 +173,18 @@ class NarrativeDataset(Dataset):
         encoded = self.tokenizer(
             ans1,
             padding="max_length",
+            truncation=True,
             max_length=self.seq_len_ans,
             return_tensors="np",
             return_token_type_ids=False,
         )
         ans1 = encoded["input_ids"][0]
-        # ans1_mask   = encoded['attention_mask'][0]
+        ans1_mask = encoded["attention_mask"][0]
 
         encoded = self.tokenizer(
             ans2,
             padding="max_length",
+            truncation=True,
             max_length=self.seq_len_ans,
             return_tensors="np",
             return_token_type_ids=False,
@@ -202,6 +207,7 @@ class NarrativeDataset(Dataset):
             encoded = self.tokenizer(
                 para,
                 padding="max_length",
+                truncation=True,
                 max_length=self.seq_len_para,
                 return_tensors="np",
                 return_token_type_ids=False,
@@ -214,13 +220,14 @@ class NarrativeDataset(Dataset):
             "ques_mask": ques_mask,
             "ans1": ans1,
             "ans2": ans2,
-            # 'ans1_mask'     : ans1_mask,
+            "ans1_mask": ans1_mask,
             "ans2_mask": ans2_mask,
             "paras": paras,
             "paras_mask": paras_mask,
         }
 
     def read_datasetfile(self, path_file):
+        # NOTE: In future, when data format is Parquet, this line must be fixed
         df = pd.read_csv(path_file, index_col=None, header=0)
 
         # self.docId          = []
@@ -229,7 +236,7 @@ class NarrativeDataset(Dataset):
         self.ques_mask = []
         self.ans1 = []
         self.ans2 = []
-        # self.ans1_mask      = []
+        self.ans1_mask = []
         self.ans2_mask = []
         self.paras = []
         self.paras_mask = []
@@ -257,7 +264,7 @@ class NarrativeDataset(Dataset):
             self.ques_mask.append(entry["ques_mask"])
             self.ans1.append(entry["ans1"])
             self.ans2.append(entry["ans2"])
-            # self.ans1_mask.append(entry['ans1_mask'])
+            self.ans1_mask.append(entry["ans1_mask"])
             self.ans2_mask.append(entry["ans2_mask"])
             self.paras.append(entry["paras"])
             self.paras_mask.append(entry["paras_mask"])

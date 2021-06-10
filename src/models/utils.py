@@ -1,9 +1,10 @@
-
 from transformers.generation_utils import *
 import torch
 
+
 class CustomGen(GenerationMixin):
-    def __init__(self,
+    def __init__(
+        self,
         batch_size: int = 2,
         min_length: int = 5,
         max_length: int = 20,
@@ -13,18 +14,18 @@ class CustomGen(GenerationMixin):
         model: Any = None,
         pad_token_id: Optional[int] = 0,
         bos_token_id: Optional[int] = 1,
-        eos_token_id: Optional[int] = 2) -> None:
+        eos_token_id: Optional[int] = 2,
+    ) -> None:
         super().__init__()
 
-        self.batch_size     = batch_size
-        self.max_length     = max_length
-        self.num_beams      = num_beams
-        self.pad_token_id   = pad_token_id
-        self.bos_token_id   = bos_token_id
-        self.eos_token_id   = eos_token_id
+        self.batch_size = batch_size
+        self.max_length = max_length
+        self.num_beams = num_beams
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
 
-
-        self.model  = model
+        self.model = model
 
         ############
         ## Declare necessary components
@@ -33,13 +34,15 @@ class CustomGen(GenerationMixin):
             batch_size=batch_size,
             max_length=max_length,
             num_beams=num_beams,
-            do_early_stopping=False
+            do_early_stopping=False,
         )
 
-        self.logits_processor = LogitsProcessorList([
-            MinLengthLogitsProcessor(min_length, eos_token_id=eos_token_id),
-            NoRepeatNGramLogitsProcessor(no_repeat_ngram_size)
-        ])
+        self.logits_processor = LogitsProcessorList(
+            [
+                MinLengthLogitsProcessor(min_length, eos_token_id=eos_token_id),
+                NoRepeatNGramLogitsProcessor(no_repeat_ngram_size),
+            ]
+        )
 
         self.stopping_criteria = self._get_stopping_criteria(
             max_length=max_length,
@@ -52,17 +55,20 @@ class CustomGen(GenerationMixin):
         )
 
     def prepare_inputs_for_generation(
-        self, input_ids, past=None, attention_mask=None, use_cache=None, encoder_outputs=None, **kwargs
+        self,
+        input_ids,
+        past=None,
+        attention_mask=None,
+        use_cache=None,
+        encoder_outputs=None,
+        **kwargs,
     ):
 
         # cut decoder_input_ids if past is used
         if past is not None:
             input_ids = input_ids[:, -1:]
 
-        return {
-            "decoder_input_ids": input_ids,
-            "encoder_outputs": encoder_outputs
-        }
+        return {"decoder_input_ids": input_ids, "encoder_outputs": encoder_outputs}
 
     def beam_sample(
         self,
@@ -80,12 +86,12 @@ class CustomGen(GenerationMixin):
         """
 
         # init values
-        output_scores       = False
-        output_attentions   = False
+        output_scores = False
+        output_attentions = False
 
-        output_hidden_states    = False
+        output_hidden_states = False
         return_dict_in_generate = False
-        is_encoder_decoder      = False
+        is_encoder_decoder = False
 
         if isinstance(model_kwargs, dict):
             model_kwargs["encoder_outputs"] = encoder_outputs
@@ -93,24 +99,39 @@ class CustomGen(GenerationMixin):
             model_kwargs = {"encoder_outputs": encoder_outputs}
 
         # init attention / hidden states / scores tuples
-        scores                  = () if (return_dict_in_generate and output_scores) else None
-        decoder_attentions      = () if (return_dict_in_generate and output_attentions) else None
-        cross_attentions        = () if (return_dict_in_generate and output_attentions) else None
-        decoder_hidden_states   = () if (return_dict_in_generate and output_hidden_states) else None
+        scores = () if (return_dict_in_generate and output_scores) else None
+        decoder_attentions = (
+            () if (return_dict_in_generate and output_attentions) else None
+        )
+        cross_attentions = (
+            () if (return_dict_in_generate and output_attentions) else None
+        )
+        decoder_hidden_states = (
+            () if (return_dict_in_generate and output_hidden_states) else None
+        )
 
         # if model is an encoder-decoder, retrieve encoder attention weights and hidden states
         if return_dict_in_generate and is_encoder_decoder:
-            encoder_attentions = model_kwargs["encoder_outputs"].get("attentions") if output_attentions else None
+            encoder_attentions = (
+                model_kwargs["encoder_outputs"].get("attentions")
+                if output_attentions
+                else None
+            )
             encoder_hidden_states = (
-                model_kwargs["encoder_outputs"].get("hidden_states") if output_hidden_states else None
+                model_kwargs["encoder_outputs"].get("hidden_states")
+                if output_hidden_states
+                else None
             )
 
         batch_size = len(self.beam_scorer._beam_hyps)
-        num_beams  = self.beam_scorer.num_beams
+        num_beams = self.beam_scorer.num_beams
 
         if input_ids is None:
             # init `input_ids` with bos_token_id
-            input_ids = torch.ones((batch_size * num_beams, 1), dtype=torch.long) * self.bos_token_id
+            input_ids = (
+                torch.ones((batch_size * num_beams, 1), dtype=torch.long)
+                * self.bos_token_id
+            )
 
         batch_beam_size, cur_len = input_ids.shape
 
@@ -128,10 +149,14 @@ class CustomGen(GenerationMixin):
                 next_token_logits, cur_len=cur_len, max_length=self.max_length
             )
 
-            next_token_scores = F.log_softmax(next_token_logits, dim=-1)  # (batch_size * num_beams, vocab_size)
+            next_token_scores = F.log_softmax(
+                next_token_logits, dim=-1
+            )  # (batch_size * num_beams, vocab_size)
 
             next_token_scores = self.logits_processor(input_ids, next_token_scores)
-            next_token_scores = next_token_scores + beam_scores[:, None].expand_as(next_token_scores)
+            next_token_scores = next_token_scores + beam_scores[:, None].expand_as(
+                next_token_scores
+            )
             next_token_scores = self.logits_warper(input_ids, next_token_scores)
 
             # Store scores, attentions and hidden_states when required
@@ -140,7 +165,9 @@ class CustomGen(GenerationMixin):
                     scores += (next_token_scores,)
                 if output_attentions:
                     decoder_attentions += (
-                        (outputs.decoder_attentions,) if is_encoder_decoder else (outputs.attentions,)
+                        (outputs.decoder_attentions,)
+                        if is_encoder_decoder
+                        else (outputs.attentions,)
                     )
                     if is_encoder_decoder:
                         cross_attentions += (outputs.cross_attentions,)
@@ -154,14 +181,18 @@ class CustomGen(GenerationMixin):
 
             # reshape for beam search
             vocab_size = next_token_scores.shape[-1]
-            next_token_scores = next_token_scores.view(batch_size, num_beams * vocab_size)
+            next_token_scores = next_token_scores.view(
+                batch_size, num_beams * vocab_size
+            )
 
             probs = F.softmax(next_token_scores, dim=-1)
 
             next_tokens = torch.multinomial(probs, num_samples=2 * num_beams)
             next_token_scores = torch.gather(next_token_scores, -1, next_tokens)
 
-            next_token_scores, _indices = torch.sort(next_token_scores, descending=True, dim=1)
+            next_token_scores, _indices = torch.sort(
+                next_token_scores, descending=True, dim=1
+            )
             next_tokens = torch.gather(next_tokens, -1, _indices)
 
             next_indices = next_tokens // vocab_size
@@ -180,7 +211,9 @@ class CustomGen(GenerationMixin):
             beam_next_tokens = beam_outputs["next_beam_tokens"]
             beam_idx = beam_outputs["next_beam_indices"]
 
-            input_ids = torch.cat([input_ids[beam_idx, :], beam_next_tokens.unsqueeze(-1)], dim=-1)
+            input_ids = torch.cat(
+                [input_ids[beam_idx, :], beam_next_tokens.unsqueeze(-1)], dim=-1
+            )
             cur_len = cur_len + 1
 
             model_kwargs = self._update_model_kwargs_for_generation(
@@ -194,7 +227,12 @@ class CustomGen(GenerationMixin):
                 break
 
         sequence_outputs = self.beam_scorer.finalize(
-            input_ids, beam_scores, next_tokens, next_indices, pad_token_id=self.pad_token_id, eos_token_id=self.eos_token_id
+            input_ids,
+            beam_scores,
+            next_tokens,
+            next_indices,
+            pad_token_id=self.pad_token_id,
+            eos_token_id=self.eos_token_id,
         )
 
         if return_dict_in_generate:
