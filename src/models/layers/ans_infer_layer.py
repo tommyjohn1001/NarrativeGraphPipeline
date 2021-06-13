@@ -13,6 +13,8 @@ class BertDecoder(torch_nn.Module):
         bert_conf = BertConfig()
         bert_conf.is_decoder = True
         bert_conf.add_cross_attention = True
+        bert_conf.num_attention_heads = 6
+        bert_conf.num_hidden_layers = 6
         self.decoder = BertModel(config=bert_conf)
 
         self.ff = torch_nn.Sequential(

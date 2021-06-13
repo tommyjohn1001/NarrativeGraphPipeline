@@ -7,46 +7,47 @@ defaults:
   - override /callbacks: null
   - override /logger: null
 
-override /PATH: null
-
 task: predict
-
-seed: 307
 
 trainer:
   _target_: pytorch_lightning.Trainer
 
-  gpus: 0
+  gpus: 1
   min_epochs: 1
   max_epochs: 1
   auto_lr_find: False
-  terminate_on_nan: true
+  terminate_on_nan: True
+  log_every_n_steps: 50
   auto_scale_batch_size: False
-
+  gradient_clip_val: 1.0
+  accelerator: null
+  precision: 16
+  check_val_every_n_epoch: 5
+  reload_dataloaders_every_epoch: True
   weights_summary: "top"
-  progress_bar_refresh_rate: 10
+  progress_bar_refresh_rate: 5
   resume_from_checkpoint: ${PATH.checkpoint}
 
 model:
   _target_: src.models.narrative_model.NarrativeModel
 
-  batch_size: ${batch_size}
   seq_len_ques: 42
   seq_len_para: 162
   seq_len_ans: 42
-  n_nodes: 435
-  n_edges: 3120
-  n_gru_layers: 5
+  n_paras: 30
+  n_layers_gru: 5
+  n_layers_trans: 3
+  n_heads_trans: 4
   max_len_ans: 12
   d_hid: 64
   d_bert: 768
   d_vocab: 30522
-  lr: 5e-4
-  w_decay: 0.0005
+  lr: 1e-5
+  w_decay: 1e-2
+  switch_frequency: 5
   beam_size: 20
   n_gram_beam: 8
   temperature: 1.4
-  topP: 0.5
 
   path_bert: ${PATH.bert}
   path_pred: ${PATH.pred}

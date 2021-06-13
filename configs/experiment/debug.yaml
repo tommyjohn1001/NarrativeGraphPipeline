@@ -25,13 +25,18 @@ trainer:
 
   gpus: 1
   min_epochs: 1
-  max_epochs: 10
+  max_epochs: 100
   auto_lr_find: False
-  terminate_on_nan: true
+  terminate_on_nan: True
+  log_every_n_steps: 50
   auto_scale_batch_size: False
-
+  gradient_clip_val: 1.0
+  accelerator: null
+  precision: 16
+  check_val_every_n_epoch: 5
+  reload_dataloaders_every_epoch: True
   weights_summary: "top"
-  progress_bar_refresh_rate: 10
+  progress_bar_refresh_rate: 5
   resume_from_checkpoint: ${PATH.checkpoint}
 
 model:
@@ -48,8 +53,9 @@ model:
   d_hid: 64
   d_bert: 768
   d_vocab: 30522
-  lr: 5e-4
-  w_decay: 0.0005
+  lr: 1e-5
+  w_decay: 1e-2
+  switch_frequency: 5
   beam_size: 20
   n_gram_beam: 8
   temperature: 1.4
@@ -62,7 +68,7 @@ datamodule:
   _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
 
   batch_size: ${batch_size}
-  num_workers: 8
+  num_workers: ${num_workers}
   seq_len_ques: 42
   seq_len_para: 162
   len_para_processing: 120

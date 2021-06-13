@@ -61,6 +61,7 @@ def train(config: DictConfig) -> Optional[float]:
     log.info(f"Instantiating trainer <{config.trainer._target_}>")
 
     ## Check if checkpoint path is specified
+    path_lastbest = config.trainer.resume_from_checkpoint
     if not os.path.isfile(config.trainer.resume_from_checkpoint):
         log.info("=> No previous checkpoint specified/found. Start fresh training.")
         config.trainer.resume_from_checkpoint = None
@@ -106,9 +107,9 @@ def train(config: DictConfig) -> Optional[float]:
     # Print path to best checkpoint and back it up
     log.info(f"Best checkpoint path:\n{trainer.checkpoint_callback.best_model_path}")
     ## Create folder storing best checkpoints
-    os.makedirs(os.path.dirname(config.trainer.resume_from_checkpoint), exist_ok=True)
+    os.makedirs(os.path.dirname(path_lastbest), exist_ok=True)
     if os.path.exists(trainer.checkpoint_callback.best_model_path):
-        shutil.copy(trainer.checkpoint_callback.best_model_path, config.trainer.resume_from_checkpoint)
+        shutil.copy(trainer.checkpoint_callback.best_model_path, path_lastbest)
 
     # Return metric score for hyperparameter optimization
     optimized_metric = config.get("optimized_metric")
