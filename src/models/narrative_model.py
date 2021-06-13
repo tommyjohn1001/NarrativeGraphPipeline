@@ -17,7 +17,7 @@ from src.datamodules.narrative_datamodule import NarrativeDataModule
 from src.models.layers.reasoning_layer.memorygraph_layer import GraphBasedMemoryLayer
 from src.models.layers.finegrain_layer import FineGrain
 from src.models.layers.ans_infer_layer import BertDecoder
-from src.models.utils import CustomGen
+from src.models.utils import BeamSearchHuggingface, BeamSearchOwn
 
 EPSILON = 10e-10
 
@@ -354,41 +354,82 @@ class NarrativeModel(plt.LightningModule):
         ####################
         # Generate answer
         ####################
-        Y_ = Y.repeat_interleave(self.beam_size, dim=0)
-        # [b_, seq_len_ans, d_bert]
+        # NOTE: This belongs to BeamSearchHugging and therefore is commented
+        # Y_ = Y.repeat_interleave(self.beam_size, dim=0)
+        # # [b_, seq_len_ans, d_bert]
 
-        generator = CustomGen(
-            batch_size=b,
-            max_length=self.max_len_ans,
-            num_beams=self.beam_size,
-            temperature=self.temperature,
+        # generator = BeamSearchHuggingface(
+        #     batch_size=b,
+        #     max_length=self.max_len_ans,
+        #     num_beams=self.beam_size,
+        #     temperature=self.temperature,
+        #     no_repeat_ngram_size=self.n_gram_beam,
+        #     model=self.generate,
+        #     pad_token_id=self.bert_tokenizer.pad_token_id,
+        #     bos_token_id=self.bert_tokenizer.cls_token_id,
+        #     eos_token_id=self.bert_tokenizer.sep_token_id,
+        # )
+
+        # outputs = generator.beam_sample(None, Y_)
+
+        outputs = []
+
+        beam_search = BeamSearchOwn(
+            beam_size=self.beam_size,
+            max_len=self.max_len_ans,
+            model=self.generate_own,
             no_repeat_ngram_size=self.n_gram_beam,
-            model=self.generate,
-            pad_token_id=self.bert_tokenizer.pad_token_id,
-            bos_token_id=self.bert_tokenizer.cls_token_id,
-            eos_token_id=self.bert_tokenizer.sep_token_id,
+            topk_strategy="select_mix_beam",
         )
 
-        outputs = generator.beam_sample(None, Y_)
+        for b_ in range(b):
+            indices = beam_search.search(Y[b_, :, :])
+
+            outputs.append(indices)
+
+        outputs = torch.LongTensor(outputs, device=self.device)
 
         return outputs
 
-    def generate(self, decoder_input_ids, encoder_outputs):
-        # decoder_input_ids: [b_, seq_len<=200]
-        # encoder_outputs  : [b_, seq_len_, d_bert]
+    # NOTE: This belongs to BeamSearchHugging and therefore is commented
+    # def generate(self, decoder_input_ids, encoder_outputs):
+    #     # decoder_input_ids: [b_, seq_len<=200]
+    #     # encoder_outputs  : [b_, seq_len_, d_bert]
 
-        b_, seq_len = decoder_input_ids.shape
+    #     b_, seq_len = decoder_input_ids.shape
 
-        decoder_input_mask = torch.ones((b_, seq_len))
+    #     decoder_input_mask = torch.ones((b_, seq_len))
+    #     decoder_input_embd = self.embd_layer.encode_ans(
+    #         decoder_input_ids, decoder_input_mask
+    #     )
+    #     # [b_, seq=*, d_bert]
+
+    #     output = self.ans_infer(encoder_outputs, decoder_input_embd, decoder_input_mask)
+    #     # [b_, seq=*, d_vocab]
+
+    #     return Seq2SeqLMOutput(logits=output)
+
+    def generate_own(self, decoder_input_ids, encoder_outputs):
+        # decoder_input_ids: [seq_len<=200]
+        # encoder_outputs  : [seq_len_ans, d_bert]
+
+        decoder_input_ids = torch.LongTensor(decoder_input_ids).unsqueeze(0)
+
+        decoder_input_mask = torch.ones(decoder_input_ids.shape)
         decoder_input_embd = self.embd_layer.encode_ans(
             decoder_input_ids, decoder_input_mask
         )
-        # [b_, seq=*, d_bert]
+        # [1, seq=*, d_bert]
+
+        encoder_outputs = encoder_outputs.unsqueeze(0)
 
         output = self.ans_infer(encoder_outputs, decoder_input_embd, decoder_input_mask)
-        # [b_, seq=*, d_vocab]
+        # [1, seq=*, d_vocab]
 
-        return Seq2SeqLMOutput(logits=output)
+        output = output.squeeze(0)
+        # [seq=*, d_vocab]
+
+        return output
 
     def predict_step(
         self,
@@ -400,6 +441,8 @@ class NarrativeModel(plt.LightningModule):
         ques_mask = batch["ques_mask"]
         paras = batch["paras"]
         paras_mask = batch["paras_mask"]
+        ans1 = batch["ans1"]
+        ans2 = batch["ans2"]
 
         pred = self(ques, ques_mask, paras, paras_mask)
 

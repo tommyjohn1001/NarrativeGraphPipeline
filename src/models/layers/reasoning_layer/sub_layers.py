@@ -99,8 +99,10 @@ class GraphLayer(torch_nn.Module):
             edge_indx_ = edge_indx[b, :, : edge_len[b].item()].squeeze(0)
 
             ## 2.2. Increment index of that edge indx by accum
-            increment = torch.Tensor([accum]).repeat(edge_indx_.shape)
-            edge_indx_ = edge_indx_ + increment.to(edge_indx_.get_device())
+            increment = torch.Tensor([accum], device=node_feat.device).repeat(
+                edge_indx_.shape
+            )
+            edge_indx_ = edge_indx_ + increment
 
             ## 2.3. Concate into 'final_edge_indx'
             if final_edge_indx is None:
