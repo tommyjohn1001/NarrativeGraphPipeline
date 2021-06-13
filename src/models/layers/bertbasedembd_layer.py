@@ -31,7 +31,7 @@ class BertBasedLayer(torch_nn.Module):
         #########################
         # Contextual embedding for question with BERT
         #########################
-        ques = self.bert_emb(input_ids=ques, attention_mask=ques_mask)
+        ques = self.bert_emb(input_ids=ques, attention_mask=ques_mask)[0]
         # [b, seq_len_ques, d_bert]
 
         #########################
@@ -39,12 +39,12 @@ class BertBasedLayer(torch_nn.Module):
         #########################
         # Convert to another shape to fit with
         # input shape of self.embedding
-        paras = paras.view((-1, seq_len_para, self.d_bert))
+        paras = paras.view((-1, seq_len_para))
         paras_mask = paras_mask.view((-1, seq_len_para))
         # paras     : [b*n_paras, seq_len_para, d_bert]
         # paras_mask: [b*n_paras, seq_len_para]
 
-        paras = self.bert_emb(input_ids=paras, attention_mask=paras_mask)
+        paras = self.bert_emb(input_ids=paras, attention_mask=paras_mask)[0]
         # [b*n_paras, seq_len_para, d_bert]
         paras = paras.view((b, -1, seq_len_para, self.d_bert))
         # [b, n_paras, seq_len_para, d_bert]
@@ -55,5 +55,5 @@ class BertBasedLayer(torch_nn.Module):
         # ans           : [b, seq_len_ans]
         # ans_mask      : [b, seq_len_ans]
 
-        return self.bert_emb(input_ids=ans, attention_mask=ans_mask)
+        return self.bert_emb(input_ids=ans, attention_mask=ans_mask)[0]
         # [b, seq_len_ans, d_bert]

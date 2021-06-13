@@ -37,6 +37,7 @@ class NarrativeModel(plt.LightningModule):
         d_vocab: int = 30522,
         lr: float = 1e-5,
         w_decay: float = 1e-2,
+        switch_frequency: int = 5,
         beam_size: int = 20,
         n_gram_beam: int = 5,
         path_bert: str = None,
@@ -53,6 +54,7 @@ class NarrativeModel(plt.LightningModule):
         self.beam_size = beam_size
         self.n_gram_beam = n_gram_beam
         self.max_len_ans = max_len_ans
+        self.switch_frequency = switch_frequency
 
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
         self.datamodule = datamodule
@@ -216,7 +218,7 @@ class NarrativeModel(plt.LightningModule):
 
         loss = self.calc_loss(pred, ans1)
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
         self.log("train/diff_ave", diff_ave, on_step=True, on_epoch=True, prog_bar=True)
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=2), 1, dim=2)
@@ -237,6 +239,10 @@ class NarrativeModel(plt.LightningModule):
     ) -> None:
         with open(self.path_train_pred, "a+") as pred_file:
             json.dump(outputs["pred"], pred_file, indent=2, ensure_ascii=False)
+
+    def on_train_epoch_end(self) -> None:
+        if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
+            self.datamodule.switch_answerability()
 
     def test_step(self, batch: Any, batch_idx: int):
         ques = batch["ques"]

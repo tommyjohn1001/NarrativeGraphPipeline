@@ -68,7 +68,7 @@ class NarrativeDataset(Dataset):
             self.curent_ith_file = ith_file
 
             # Reload dataset
-            gc.collect()
+            # gc.collect()
             self.read_datasetfile(self.paths[self.curent_ith_file])
 
         return {
@@ -82,6 +82,16 @@ class NarrativeDataset(Dataset):
             "paras": self.paras[indx],
             "paras_mask": self.paras_mask[indx],
         }
+
+    def _get_context(self, En, Hn):
+        n_samples = min((len(En), self.n_paras))
+        if self.split == "train":
+            selects_Hn = int(n_samples * self.exchange_rate)
+            selects_En = n_samples - selects_Hn
+
+            return sample(En, selects_En) + sample(Hn, selects_Hn)
+
+        return sample(Hn, n_samples)
 
     def f_process_file_multi(self, entries, queue):
         for entry in entries.itertuples():
@@ -137,9 +147,10 @@ class NarrativeDataset(Dataset):
         ###########################
         # Process context
         ###########################
+        En = ast.literal_eval(entry.En)
         Hn = ast.literal_eval(entry.Hn)
-        n_samples = min((len(Hn), self.n_paras))
-        contx = sample(Hn, n_samples)
+
+        contx = self._get_context(En, Hn)
 
         # Process context
         paras = np.zeros((self.n_paras, self.seq_len_para), dtype=np.int)
@@ -180,7 +191,7 @@ class NarrativeDataset(Dataset):
         self.paras = []
         self.paras_mask = []
 
-        gc.collect()
+        # gc.collect()
 
         ######################
         # Fill self.ques, self.ans1,  self.ans2,
@@ -206,3 +217,9 @@ class NarrativeDataset(Dataset):
             self.ans1_mask.append(entry["ans1_mask"])
             self.paras.append(entry["paras"])
             self.paras_mask.append(entry["paras_mask"])
+
+    def switch_answerability(self):
+        if self.exchange_rate == 1:
+            self.exchange_rate = 0
+        else:
+            self.exchange_rate += 0.25

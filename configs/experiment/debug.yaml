@@ -58,7 +58,6 @@ model:
   switch_frequency: 5
   beam_size: 20
   n_gram_beam: 8
-  temperature: 1.4
 
   path_bert: ${PATH.bert}
   path_pred: ${PATH.pred}
