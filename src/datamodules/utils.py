@@ -2,7 +2,6 @@ from random import sample
 import glob, ast, gc, os, math
 
 from torch.utils.data.sampler import Sampler
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import Dataset
 import torch
 from transformers import BertTokenizer
@@ -13,8 +12,7 @@ import pandas as pd, numpy as np
 from src.utils.utils import ParallelHelper
 
 
-# class CustomSampler(Sampler[int]):
-class CustomSampler(DistributedSampler):
+class CustomSampler(Sampler[int]):
     r"""Samples elements sequentially, always in the same order.
 
     Args:
@@ -116,7 +114,7 @@ class NarrativeDataset(Dataset):
             self.curent_ith_file = ith_file
 
             # Reload dataset
-            gc.collect()
+            # gc.collect()
             self.read_datasetfile(self.paths[self.curent_ith_file])
 
         return {
@@ -243,7 +241,7 @@ class NarrativeDataset(Dataset):
         self.paras = []
         self.paras_mask = []
 
-        gc.collect()
+        # gc.collect()
 
         ######################
         # Fill self.ques, self.ans1,  self.ans2,
