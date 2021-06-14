@@ -34,13 +34,10 @@ class MemoryBasedReasoning(torch_nn.Module):
         self.trans_enc = CustomTransEnc(
             CustomTransEncLayer(d_model=d_hid, nhead=n_heads_trans),
             n_layers_trans,
-            seq_len_ques,
             seq_len_para,
             d_hid,
         )
-        self.memory = Memory(
-            seq_len_ques, seq_len_para, n_layers_gru, d_hid, n_paras, device
-        )
+        self.memory = Memory(seq_len_para, n_layers_gru, d_hid, n_paras, device)
 
         self.lin1 = torch_nn.Linear(d_bert, d_hid, bias=False)
         self.lin2 = torch_nn.Linear(d_hid, seq_len_ans, bias=False)
@@ -54,74 +51,66 @@ class MemoryBasedReasoning(torch_nn.Module):
         # paras     : [b, n_paras, seq_len_para, d_bert]
         # paras_mask: [b, n_paras, seq_len_para]
 
-        b, n_paras, _, _ = paras.shape
+        b = paras.shape[0]
 
         ######################################
         # Transform input tensors to appropriate dimension
         ######################################
         ques = self.lin1(ques)
         paras = self.lin1(paras)
-        # ques      : [b, seq_len_ques, d_bert]
-        # paras     : [b, n_paras, seq_len_para, d_bert]
+        # ques      : [b, seq_len_ques, d_hid]
+        # paras     : [b, n_paras, seq_len_para, d_hid]
 
         ######################################
         # Reasoning with memory and TransformerEncoder
         ######################################
 
         ## Unsqueeze and repeat tensor 'ques' to match shape of 'paras'
-        ques_ = ques.unsqueeze(1).repeat(1, self.n_paras, 1, 1)
-        ques_paras = torch.cat((ques_, paras), dim=2)
-        # [b, n_paras, seq_len_ques + seq_len_para, d_hid]
+        ques_ = (
+            torch.sum(ques, dim=1)
+            .reshape(b, 1, 1, self.d_hid)
+            .repeat(1, self.n_paras, self.seq_len_para, 1)
+        )
+        ques_paras = torch.cat((ques_, paras), dim=3)
+        # [b, n_paras, seq_len_para, d_hid * 2]
 
         Y = []
 
-        for nth_para in range(n_paras):
+        for nth_para in range(self.n_paras):
             ques_para = ques_paras[:, nth_para]
-            # [b, seq_len_ques + seq_len_para, d_hid]
+            # [b, seq_len_para, d_hid * 2]
 
             memory_cell = self.memory.get_mem_cell(nth_para)
-            # [seq_len_ques + seq_len_para, d_hid]
+            # [seq_len_para, d_hid * 2]
             if torch.sum(memory_cell) == 0:
                 memory_cell = ques_para
             else:
                 memory_cell = memory_cell.repeat(b, 1, 1)
-            # memory_cell: [b, seq_len_ques + seq_len_para, d_hid]
+            # memory_cell: [b, seq_len_para, d_hid * 2]
 
             output = self.trans_enc(
                 memory_cell.transpose(0, 1), ques_para.transpose(0, 1)
             )
-            # [b, seq_len_ques + seq_len_para, d_hid]
+            # [b, seq_len_para, d_hid * 2]
 
             Y.append(output.unsqueeze(1))
 
             self.memory.update_mem(nth_para, ques_para, output)
 
-        final = self.memory.get_final_memory(ques, paras, paras_mask)
-        # [seq_len_ques + seq_len_para, d_hid]
-        final = final.reshape(
-            1, 1, self.seq_len_ques + self.seq_len_para, self.d_hid
-        ).repeat(b, 1, 1, 1)
-
-        Y.append(final)
         Y = torch.cat(Y, dim=1).type_as(ques)
-        # [b, n_paras + 1, seq_len_ques + seq_len_para, d_hid]
+        # [b, n_paras, seq_len_para, d_hid * 2]
 
         ######################################
-        # Derive attentive matrix from question
-        # for tensor 'Y'
+        # Concat tensor 'Y' with final memory cell
         ######################################
-        ques = self.lin2(ques)
-        # [b, seq_len_ques, seq_len_ans]
-        attentive = self.lin3(ques.transpose(1, 2))
-        # [b, seq_len_ans, (n_paras + 1) * (seq_len_ques + seq_len_para)]
+        final = self.memory.get_final_memory(ques, paras, paras_mask)
+        # [seq_len_para, d_hid * 2]
+        final = final.reshape(1, 1, self.seq_len_para, self.d_hid * 2).repeat(
+            b, self.n_paras, 1, 1
+        )
+        # [b, n_paras, seq_len_para, d_hid * 2]
 
-        Y = Y.reshape(b, -1, self.d_hid)
-        # [b, (n_paras + 1) * (seq_len_ques + seq_len_para), d_hid]
-
-        Y = torch.bmm(torch.softmax(attentive, dim=2), Y)
-        # [b, seq_len_ans, d_hid]
-
-        Y = self.lin4(Y)
-        # [b, seq_len_ans, d_bert]
+        Y = torch.cat((Y, final), dim=3)
+        # [b, n_paras, seq_len_para, d_hid * 4]
 
         return Y

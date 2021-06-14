@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## June 14 2021, 21:51
+
+- Apply _Adaptive Teacher forcing_
+- Replace _BertDecoder_ in module _ans_infer_, use _GRU_ and _attention_ and _maxout pointer generator_ instead
+- Modify and simplify module _reasoning_ and _memory_ to match with new module _ans_infer_
+
 ## June 13 2021, 16:59
 
 - Replace _BeamSearchHuggingface_ by my own BeamSearch (this is the old one)

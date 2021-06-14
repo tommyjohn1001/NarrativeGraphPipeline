@@ -60,7 +60,7 @@ class NarrativeModel(plt.LightningModule):
         self.datamodule = datamodule
 
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
-        self.teacher_forcing_ratio = 0.75
+        self.teacher_forcing_ratio = 1
 
         #############################
         # Define model
@@ -201,12 +201,12 @@ class NarrativeModel(plt.LightningModule):
         # Do reasoning
         ####################
         Y = self.reasoning(ques, paras, paras_mask)
-        # [b, seq_len_ans, d_bert]
+        # [b, n_paras, seq_len_para, d_hid * 4]
 
         ####################
         # Generate answer
         ####################
-        pred = self.ans_infer.train(Y, ans, ans_mask)
+        pred = self.ans_infer.do_train(Y, ans, ans_mask, self.teacher_forcing_ratio)
         # pred: [b, seq_len_ans, d_vocab]
 
         return pred, self.calc_diff_ave(Y)
@@ -356,7 +356,7 @@ class NarrativeModel(plt.LightningModule):
         # Do reasoning
         ####################
         Y = self.reasoning(ques, paras)
-        # [b, seq_len_ans, d_bert]
+        # [b, n_paras, seq_len_para, d_hid * 4]
 
         ####################
         # Generate answer
@@ -370,11 +370,11 @@ class NarrativeModel(plt.LightningModule):
             max_len=self.max_len_ans,
             model=self.generate,
             no_repeat_ngram_size=self.n_gram_beam,
-            topk_strategy="select_mix_beam",
+            topk_strategy="topk",
         )
 
         for b_ in range(b):
-            indices = generator.search(Y[b_, :, :])
+            indices = generator.search(Y[b_])
 
             outputs.append(indices)
 
@@ -383,8 +383,8 @@ class NarrativeModel(plt.LightningModule):
         return outputs
 
     def generate(self, decoder_input_ids, encoder_outputs):
-        # decoder_input_ids: [seq_len<=200]
-        # encoder_outputs  : [seq_len_ans, d_bert]
+        # decoder_input_ids: list of input_ids
+        # encoder_outputs  : [n_paras, seq_len_para, d_hid * 4]
 
         decoder_input_ids = (
             torch.LongTensor(decoder_input_ids)
@@ -392,18 +392,15 @@ class NarrativeModel(plt.LightningModule):
             .long()
             .unsqueeze(0)
         )
+        # [1, seq_len]
 
         decoder_input_mask = torch.ones(decoder_input_ids.shape, device=self.device)
-        decoder_input_embd = self.embd_layer.encode_ans(
-            decoder_input_ids, decoder_input_mask
-        )
-        # [1, seq=*, d_bert]
+        # [1, seq_len]
 
         encoder_outputs = encoder_outputs.unsqueeze(0)
+        # [1, n_paras, seq_len_para, d_hid * 4]
 
-        output = self.ans_infer.predict(
-            encoder_outputs, decoder_input_embd, decoder_input_mask
-        )
+        output = self.ans_infer(encoder_outputs, decoder_input_ids, decoder_input_mask)
         # [1, seq=*, d_vocab]
 
         output = output.squeeze(0)
