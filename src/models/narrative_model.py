@@ -14,7 +14,7 @@ import numpy as np
 
 from src.datamodules.narrative_datamodule import NarrativeDataModule
 from src.models.layers.reasoning_layer.memory_layer import MemoryBasedReasoning
-from src.models.layers.bertbasedembd_layer import BertBasedLayer
+from src.models.layers.bertbasedembd_layer import BertBasedEmbedding
 from src.models.layers.ans_infer_layer import BertDecoder
 from src.utils.generator import GeneratorOwn
 
@@ -55,17 +55,17 @@ class NarrativeModel(plt.LightningModule):
         self.n_gram_beam = n_gram_beam
         self.max_len_ans = max_len_ans
         self.switch_frequency = switch_frequency
-
-        self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
-        self.datamodule = datamodule
-
         self.path_pred = path_pred
         self.path_train_pred = path_train_pred
+        self.datamodule = datamodule
+
+        self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
+        self.teacher_forcing_ratio = 0.75
 
         #############################
         # Define model
         #############################
-        self.embd_layer = BertBasedLayer(d_bert, path_bert)
+        self.embd_layer = BertBasedEmbedding(d_bert, path_bert)
         self.reasoning = MemoryBasedReasoning(
             seq_len_ques,
             seq_len_para,
@@ -78,7 +78,13 @@ class NarrativeModel(plt.LightningModule):
             d_bert,
             self.device,
         )
-        self.ans_infer = BertDecoder(seq_len_ans, d_bert, d_vocab)
+        self.ans_infer = BertDecoder(
+            seq_len_ans=seq_len_ans,
+            d_bert=d_bert,
+            d_vocab=d_vocab,
+            cls_tok_id=self.bert_tokenizer.cls_token_id,
+            embd_layer=self.embd_layer,
+        )
 
         ## Freeeze some parameters
         list_freeze_sets = [
@@ -200,7 +206,7 @@ class NarrativeModel(plt.LightningModule):
         ####################
         # Generate answer
         ####################
-        pred = self.ans_infer(Y, ans, ans_mask)
+        pred = self.ans_infer.train(Y, ans, ans_mask)
         # pred: [b, seq_len_ans, d_vocab]
 
         return pred, self.calc_diff_ave(Y)
@@ -243,6 +249,10 @@ class NarrativeModel(plt.LightningModule):
     def on_train_epoch_end(self) -> None:
         if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
             self.datamodule.switch_answerability()
+
+        self.teacher_forcing_ratio -= 0.3
+        if self.teacher_forcing_ratio <= 0:
+            self.teacher_forcing_ratio = 0
 
     def test_step(self, batch: Any, batch_idx: int):
         ques = batch["ques"]
@@ -391,7 +401,9 @@ class NarrativeModel(plt.LightningModule):
 
         encoder_outputs = encoder_outputs.unsqueeze(0)
 
-        output = self.ans_infer(encoder_outputs, decoder_input_embd, decoder_input_mask)
+        output = self.ans_infer.predict(
+            encoder_outputs, decoder_input_embd, decoder_input_mask
+        )
         # [1, seq=*, d_vocab]
 
         output = output.squeeze(0)

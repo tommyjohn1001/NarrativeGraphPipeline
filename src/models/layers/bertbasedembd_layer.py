@@ -6,7 +6,7 @@ import torch.nn as torch_nn
 transformers.logging.set_verbosity_error()
 
 
-class BertBasedLayer(torch_nn.Module):
+class BertBasedEmbedding(torch_nn.Module):
     """Embed and generate question-aware context"""
 
     def __init__(self, d_bert: int = 768, path_bert: str = None):
