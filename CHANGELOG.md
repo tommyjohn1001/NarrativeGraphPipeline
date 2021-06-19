@@ -2,6 +2,16 @@
 
 ### This file contains changes and modifications during developing.
 
+## June 19 2021, 11:46
+
+- Apply data _version 4_ for training: not removing stopwords, new HTML removing, start-end extraction
+- Reduce **n_paras** to _5_, **seq_len_ans** to _15_, increase **seq_len_para** to _170_
+- Officially use BertVocab instead of own vocab
+- Use **parquet** data format instead **csv**
+- Change name of fields in _dataset.py_: **ques** to **ques_ids**, **paras** to **context_ids**,...
+- Add _PointerGenerator_ mechanism on top of current _BertDecoder_
+- _Teacher forcing_ ratio is now backed up into checkpoints and logged into _Tensorboard_
+
 ## June 14 2021, 21:51
 
 - Apply _Adaptive Teacher forcing_

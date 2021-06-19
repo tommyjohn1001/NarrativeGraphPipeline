@@ -43,9 +43,8 @@ ignore_warnings: True
 #############################################################
 PATH:
   raw_data: /root/NarrativeQA
-  processed_contx: backup/proc_contx/[ID].json
-  data: ${data_dir}/[SPLIT]/data_[SHARD].csv
-  vocab: ${data_dir}/vocab.txt
+  processed_contx: ${data_dir}/proc_contx/[ID].json
+  data: ${data_dir}/[SPLIT]/data_[SHARD].parquet
 
   bert: ${data_dir}/bert-base-uncased
 

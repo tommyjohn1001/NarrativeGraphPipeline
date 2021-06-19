@@ -14,9 +14,9 @@ class MemoryBasedReasoning(torch_nn.Module):
     def __init__(
         self,
         seq_len_ques: int = 42,
-        seq_len_para: int = 162,
-        seq_len_ans: int = 42,
-        n_paras: int = 30,
+        seq_len_para: int = 170,
+        seq_len_ans: int = 15,
+        n_paras: int = 5,
         n_layers_gru: int = 5,
         n_heads_trans: int = 4,
         n_layers_trans: int = 3,
@@ -46,32 +46,32 @@ class MemoryBasedReasoning(torch_nn.Module):
         )
         self.lin4 = torch_nn.Linear(d_hid, d_bert, bias=False)
 
-    def forward(self, ques, paras, paras_mask):
-        # ques      : [b, seq_len_ques, d_bert]
-        # paras     : [b, n_paras, seq_len_para, d_bert]
-        # paras_mask: [b, n_paras, seq_len_para]
+    def forward(self, ques, context, context_mask):
+        # ques: [b, seq_len_ques, d_bert]
+        # context: [b, n_paras, seq_len_para, d_bert]
+        # context_mask: [b, n_paras, seq_len_para]
 
-        b = paras.shape[0]
+        b = context.size(0)
 
         ######################################
         # Transform input tensors to appropriate dimension
         ######################################
         ques = self.lin1(ques)
-        paras = self.lin1(paras)
+        context = self.lin1(context)
         # ques      : [b, seq_len_ques, d_hid]
-        # paras     : [b, n_paras, seq_len_para, d_hid]
+        # context     : [b, n_paras, seq_len_para, d_hid]
 
         ######################################
         # Reasoning with memory and TransformerEncoder
         ######################################
 
-        ## Unsqueeze and repeat tensor 'ques' to match shape of 'paras'
+        ## Unsqueeze and repeat tensor 'ques' to match shape of 'context'
         ques_ = (
             torch.sum(ques, dim=1)
             .reshape(b, 1, 1, self.d_hid)
             .repeat(1, self.n_paras, self.seq_len_para, 1)
         )
-        ques_paras = torch.cat((ques_, paras), dim=3)
+        ques_paras = torch.cat((ques_, context), dim=3)
         # [b, n_paras, seq_len_para, d_hid * 2]
 
         Y = []
@@ -103,7 +103,7 @@ class MemoryBasedReasoning(torch_nn.Module):
         ######################################
         # Concat tensor 'Y' with final memory cell
         ######################################
-        final = self.memory.get_final_memory(ques, paras, paras_mask)
+        final = self.memory.get_final_memory(ques, context, context_mask)
         # [seq_len_para, d_hid * 2]
         final = final.reshape(1, 1, self.seq_len_para, self.d_hid * 2).repeat(
             b, self.n_paras, 1, 1

@@ -339,7 +339,7 @@ class GeneratorOwn:
         Args:
             Y (torch.Tensor): Result tensfor from previous model
         """
-        # Y: [seq_len_contx, d_hid * 2]
+        # Y: [seq_len_contx, d_hid * 4]
 
         queue = CustomPriorityQueue(self.beam_size, self.init_tok, "min")
 

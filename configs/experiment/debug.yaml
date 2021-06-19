@@ -43,9 +43,9 @@ model:
   _target_: src.models.narrative_model.NarrativeModel
 
   seq_len_ques: 42
-  seq_len_para: 162
-  seq_len_ans: 42
-  n_paras: 30
+  seq_len_para: 170
+  seq_len_ans: 15
+  n_paras: 5
   n_layers_gru: 5
   n_layers_trans: 3
   n_heads_trans: 4
@@ -69,17 +69,13 @@ datamodule:
   batch_size: ${batch_size}
   num_workers: ${num_workers}
   seq_len_ques: 42
-  seq_len_para: 162
+  seq_len_para: 170
   len_para_processing: 120
-  seq_len_ans: 42
+  seq_len_ans: 15
   sizes_dataset:
-    train: 32744
-    test: 10552
-    valid: 3456
-  sizes_shard:
-    train: 4093
-    test: 1319
-    valid: 432
+    train: 32747
+    test: 10557
+    valid: 3461
 
   path_bert: ${PATH.bert}
   path_data: ${PATH.data}

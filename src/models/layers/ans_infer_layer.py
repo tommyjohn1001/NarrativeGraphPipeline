@@ -1,7 +1,8 @@
 import random
+from typing import List
 
+from transformers import BertConfig, BertModel
 import torch.nn as torch_nn
-import torch.nn.functional as torch_f
 import torch
 
 from src.models.layers.bertbasedembd_layer import BertBasedEmbedding
@@ -10,10 +11,11 @@ from src.models.layers.bertbasedembd_layer import BertBasedEmbedding
 class BertDecoder(torch_nn.Module):
     def __init__(
         self,
-        seq_len_ans: int = 42,
-        n_layers_gru: int = 4,
-        d_bert: int = 768,
+        seq_len_para: int = 170,
+        seq_len_ans: int = 15,
         d_vocab: int = 30522,
+        n_paras: int = 5,
+        d_bert: int = 768,
         d_hid: int = 64,
         cls_tok_id: int = 101,
         embd_layer: torch.nn.Module = None,
@@ -21,145 +23,193 @@ class BertDecoder(torch_nn.Module):
         super().__init__()
 
         self.seq_len_ans = seq_len_ans
-        self.d_bert = d_bert
         self.d_hid = d_hid
         self.cls_tok_id = cls_tok_id
         self.d_vocab = d_vocab
 
-        self.embd_layer: BertBasedEmbedding = embd_layer
         self.d_hid_ = d_hid * 4
+        self.embd_layer: BertBasedEmbedding = embd_layer
+        bert_conf = BertConfig()
+        bert_conf.is_decoder = True
+        bert_conf.hidden_size = d_hid
+        bert_conf.add_cross_attention = True
+        bert_conf.num_attention_heads = 8
+        bert_conf.num_hidden_layers = 6
+        self.trans_decoder = BertModel(config=bert_conf)
 
-        self.gru = torch_nn.GRU(
-            input_size=d_bert,
-            hidden_size=d_hid * 2,
-            num_layers=n_layers_gru,
-            batch_first=True,
-            bidirectional=True,
-        )
-        self.lin1 = torch_nn.Linear(self.d_hid_, self.d_hid_)
-        self.ff1 = torch_nn.Sequential(
-            torch_nn.Linear(self.d_hid_ * 2, self.d_hid_ * 2, bias=False),
+        self.lin1 = torch_nn.Linear(d_bert, d_hid)
+        self.lin_attn_1 = torch_nn.Linear(self.d_hid_, self.d_hid_)
+        self.lin_attn_2 = torch_nn.Linear(d_hid, self.d_hid_)
+        self.lin_attn_3 = torch_nn.Linear(self.d_hid_, 1)
+        self.ff_attn_1 = torch_nn.Sequential(
+            torch_nn.Linear(self.d_hid_, self.d_hid_),
+            torch_nn.BatchNorm1d(n_paras * seq_len_para),
             torch_nn.Tanh(),
-            torch_nn.BatchNorm1d(seq_len_ans),
         )
-        self.lin2 = torch_nn.Linear(self.d_hid_ * 2, d_vocab, bias=False)
-
-        self.lin3 = torch_nn.Linear(1, d_vocab, bias=False)
-
-    def forward(self, Y: torch.Tensor, ans: torch.Tensor, ans_mask: torch.Tensor):
-        # Y        : [b, n_paras, seq_len_para, d_hid_]
-        # ans      : [b, seq_len]
-        # ans_mask : [b, seq_len]
-
-        b, seq_len = ans.shape
-
-        ans = torch_f.pad(ans, (0, self.seq_len_ans - seq_len), "constant", 0)
-        ans_mask = torch_f.pad(ans_mask, (0, self.seq_len_ans - seq_len), "constant", 0)
-
-        ##########################################
-        ## Embed with BertBasedEmbd layer
-        ##########################################
-        ans = self.embd_layer.encode_ans(ans, ans_mask)
-        # [b, seq_len_ans, d_bert]
-
-        ##########################################
-        ## Start decoding with GRU
-        ##########################################
-        ans_len = torch.sum(ans_mask, dim=1)
-        tmp = torch_nn.utils.rnn.pack_padded_sequence(
-            ans, ans_len, batch_first=True, enforce_sorted=False
+        self.lin_abstr_1 = torch_nn.Sequential(
+            torch_nn.Linear(d_hid * 5, d_hid * 5),
+            torch_nn.Linear(d_hid * 5, d_vocab),
         )
-        tmp = self.gru(tmp)[0]
-        d = torch_nn.utils.rnn.pad_packed_sequence(tmp, batch_first=True)[0]
-        # [b, seq_len*, d_hid_]
 
-        d = torch_f.pad(d, (0, 0, 0, self.seq_len_ans - d.shape[1]), "constant", 0)
-        # [b, seq_len_ans, d_hid_]
+        self.lin_swch_1 = torch_nn.Linear(d_hid * 5, 1)
+        self.lin_swch_2 = torch_nn.Linear(d_hid, 1)
+        self.lin_swch_3 = torch_nn.Linear(d_hid, 1)
 
-        ##########################################
-        ## Calculate generating score
-        ##########################################
-        Y = Y.reshape(b, -1, self.d_hid_)
-        # [b, seq_len_contx = n_paras*seq_len_para, d_hid_]
+    def forward(self, ans: torch.Tensor, ans_mask: torch.Tensor):
+        # ans      : [b, seq_len_ans, d_hid]
+        # ans_mask : [b, seq_len_ans]
 
-        r = torch.bmm(Y, self.lin1(d).transpose(1, 2))
-        # [b, seq_len_contx, seq_len_ans]
+        output = self.trans_decoder(inputs_embeds=ans, attention_mask=ans_mask)[0]
+        # [b, seq_len_ans, d_hid]
 
-        a = torch.softmax(r, dim=1)
+        return output
 
-        c = torch.bmm(a.transpose(1, 2), Y)
-        # [b, seq_len_ans, d_hid_]
+    def attention(self, Y: torch.Tensor, decoder_out: torch.Tensor):
+        # Y: [b, n_paras, seq_len_para, d_hid_]
+        # decoder_out: [b, d_hid]
 
-        d_ = self.ff1(torch.cat((d, c), dim=2))
-        # [b, seq_len_ans, d_hid_ * 2]
+        Y_ = self.lin_attn_1(Y)
+        # [b, seq_len_contx, d_hid_]
+        decoder_out = self.lin_attn_2(decoder_out).unsqueeze(1)
+        # [b, 1, d_hid_]
 
-        score_gen = self.lin2(d_)
-        # [b, seq_len_ans, d_vocab]
+        e_t = self.ff_attn_1(Y_ + decoder_out)
+        # [b, seq_len_contx, d_hid_]
+        e_t = self.lin_attn_3(e_t)
+        # [b, seq_len_contx, 1])
 
-        ##########################################
-        ## Calculate pointing score
-        ##########################################
-        score_copy = torch.max(r, dim=1)[0]
-        # [b, seq_len_ans]
+        extract_dist = torch.softmax(e_t, dim=1)
 
-        score_copy = self.lin3(score_copy.unsqueeze(2))
-        # [b, seq_len_ans, d_vocab]
+        return extract_dist
 
-        ##########################################
-        ## Combine copy and pointing score
-        ##########################################
-        total = torch.cat((score_gen, score_copy), dim=2)
-        # [b, seq_len_ans, d_vocab * 2]
+    def pointer_generator(self, Y, context_ids, decoder_output, ans):
+        # Y             : [b, seq_len_contx, d_hid * 4]
+        # context_ids   : [b, seq_len_contx]
+        # decoder_output: [b, d_hid]
+        # ans           : [b, ith, d_hid]
 
-        total = torch.softmax(total, dim=-1)
+        #########################
+        ## Calculate extractive dist over context
+        #########################
+        extract_dist = self.attention(Y, decoder_output)
+        # [b, seq_len_contx, 1]
 
-        pred = total[:, :, : self.d_vocab] + total[:, :, self.d_vocab :]
-        # [b, seq_len_ans, d_vocab]
+        #########################
+        ## Calculate abstractive dist over gen vocab
+        #########################
+        contx = (extract_dist.repeat(1, 1, Y.size()[-1]) * Y).sum(dim=1)
+        # [b, d_hid_]
+        contx = torch.cat((contx, decoder_output), dim=-1)
+        # [b, d_hid * 5]
+        abstr_dist = self.lin_abstr_1(contx)
+        # [b, d_vocab]
 
-        return pred[:, :seq_len, :]
+        #########################
+        ## Calculate extract-abstract switch and combine them
+        #########################
+        switch = (
+            self.lin_swch_1(contx)
+            + self.lin_swch_2(ans[:, -1])
+            + self.lin_swch_3(decoder_output)
+        )
+        # [b, 1]
+        switch = torch.sigmoid(switch)
+
+        final = switch * abstr_dist
+        # [b, d_vocab]
+
+        # Scatter
+        extract_dist = (1 - switch) * extract_dist.squeeze(-1)
+        final = final.scatter_add_(dim=-1, index=context_ids, src=extract_dist)
+        # [b, d_vocab]
+
+        return final
 
     def do_train(
         self,
         Y: torch.Tensor,
-        ans: torch.Tensor,
+        ans_ids: torch.Tensor,
         ans_mask: torch.Tensor,
+        context_ids: torch.Tensor,
         teacher_forcing_ratio: float,
     ):
-        # Y         : [b, n_paras, seq_len_para, d_hid_]
-        # ans       : [b, seq_len_ans]
+        # Y         : [b, n_paras, seq_len_para, d_hid * 4]
+        # ans_ids   : [b, seq_len_ans]
         # ans_mask  : [b, seq_len_ans]
-        b = ans.shape[0]
+        # context_ids: [b, n_paras, seq_len_para]
 
-        input_ids = torch.full((b, 1), self.cls_tok_id, device=Y.device)
+        b = Y.size()[0]
+        Y = Y.view(b, -1, self.d_hid * 4)
+        context_ids = context_ids.view(b, -1)
+
+        final_dists = []
+        input_ids = torch.full((Y.size()[0], 1), self.cls_tok_id, device=Y.device)
         # [b, 1]
 
         for ith in range(1, self.seq_len_ans + 1):
-            output = self(Y, input_ids, ans_mask[:, : input_ids.shape[1]])
-            # [b, ith, d_vocab]
+            ## Embed answer
+            ans = self.embd_layer.encode_ans(input_ids, ans_mask[:, :ith])
+            # [b, ith, d_bert]
+            ans = self.lin1(ans)
+            # [b, ith, d_hid]
 
+            ## Decode answer
+            decoder_output = self(ans, ans_mask[:, :ith])[:, -1, :]
+            # [b, d_hid]
+
+            ## Get final distribution over extended vocab
+            final = self.pointer_generator(
+                Y=Y, context_ids=context_ids, decoder_output=decoder_output, ans=ans
+            )
+            # [b, d_vocab]
+
+            final_dists.append(final.unsqueeze(-1))
+
+            ## Apply Scheduling teacher
             if ith == self.seq_len_ans:
                 break
 
-            output = torch.argmax(output, dim=2)
+            final = torch.argmax(final, dim=-1)
             chosen = self.choose_teacher_forcing(
                 teacher_forcing_ratio=teacher_forcing_ratio,
-                output=output,
-                ans=ans,
+                output=final,
+                ans_ids=ans_ids,
+                ith=ith,
             )
             # [b]
             input_ids = torch.cat((input_ids, chosen.detach().unsqueeze(1)), dim=1)
 
-        return output
+        return torch.cat(final_dists, dim=-1)
 
     def choose_teacher_forcing(
-        self, teacher_forcing_ratio: float, output: torch.Tensor, ans: torch.Tensor
+        self,
+        teacher_forcing_ratio: float,
+        output: torch.Tensor,
+        ans_ids: torch.Tensor,
+        ith: int,
     ):
-        # output: [b, seq_len]
-        # ans   : [b, seq_len_ans]
-        seq_len = output.shape[1]
+        # output: [b]
+        # ans_ids   : [b, seq_len_ans]
         use_teacher_forcing = random.random() < teacher_forcing_ratio
 
-        if use_teacher_forcing:
-            return ans[:, seq_len]
+        return output if use_teacher_forcing else ans_ids[:, ith]
 
-        return output[:, seq_len]
+    def do_predict(
+        self,
+        decoder_input_ids: List,
+        Y: torch.Tensor,
+        context_ids: torch.Tensor,
+    ):
+        ## TODO: Finish implementation later
+
+        # decoder_input_ids: list of indices
+        # Y  : [n_paras, seq_len_para, d_hid * 4]
+
+        decoder_input_ids = (
+            torch.LongTensor(decoder_input_ids).type_as(Y).long().unsqueeze(0)
+        )
+
+        decoder_input_mask = torch.ones(decoder_input_ids.shape, device=self.device)
+        decoder_input_embd = self.embd_layer.encode_ans(
+            decoder_input_ids, decoder_input_mask
+        )
