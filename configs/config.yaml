@@ -55,5 +55,5 @@ PATH:
 #############################################################
 ### THIS SECTION IS FOR VERY GENERAL CONFIGURATIONS
 #############################################################
-batch_size: 8
+batch_size: 32
 num_workers: 8

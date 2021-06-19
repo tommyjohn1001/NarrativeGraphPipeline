@@ -1,5 +1,5 @@
 from random import sample
-import glob, ast
+import glob
 
 from torch.utils.data import Dataset
 import torch
@@ -18,7 +18,6 @@ class NarrativeDataset(Dataset):
         path_data: str,
         path_bert: str,
         size_dataset: int,
-        size_shard: int,
         seq_len_ques: int = 42,
         seq_len_para: int = 170,
         seq_len_ans: int = 15,
@@ -62,6 +61,10 @@ class NarrativeDataset(Dataset):
 
         ith_file = indx // size_shard
         indx = indx % size_shard
+
+        if ith_file == 8:
+            ith_file -= 1
+            indx = indx + size_shard + 1
 
         # Check nth file and reload dataset if needed
         if ith_file != self.curent_ith_file:
@@ -115,13 +118,11 @@ class NarrativeDataset(Dataset):
         ###########################
         # Process answers
         ###########################
-        answers = ast.literal_eval(entry.answers)
+        ans1, ans2 = entry.answers
 
         # This trick ensures training process occurs in longer answer
-        if len(" ".split(answers[0])) < len(" ".split(answers[1])):
-            answers[0], answers[1] = answers[1], answers[0]
-
-        ans1, ans2 = answers
+        if len(" ".split(ans1)) < len(" ".split(ans2)):
+            ans1, ans2 = ans2, ans1
 
         encoded = self.tokenizer(
             ans1,
@@ -147,8 +148,8 @@ class NarrativeDataset(Dataset):
         ###########################
         # Process context
         ###########################
-        En = ast.literal_eval(entry.En)
-        Hn = ast.literal_eval(entry.Hn)
+        En = entry.En.tolist()
+        Hn = entry.Hn.tolist()
 
         contx = self._get_context(En, Hn)
 
@@ -179,7 +180,7 @@ class NarrativeDataset(Dataset):
 
     def read_datasetfile(self, path_file):
         # NOTE: In future, when data format is Parquet, this line must be fixed
-        df = pd.read_parquet(path_file, index_col=None, header=0)
+        df = pd.read_parquet(path_file)
 
         # self.docId          = []
         # self.ques_plain     = []

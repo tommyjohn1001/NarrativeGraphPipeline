@@ -120,7 +120,9 @@ class BertDecoder(torch_nn.Module):
 
         # Scatter
         extract_dist = (1 - switch) * extract_dist.squeeze(-1)
-        final = final.scatter_add_(dim=-1, index=context_ids, src=extract_dist)
+        final = final.scatter_add(
+            dim=-1, index=context_ids, src=extract_dist.type_as(final)
+        )
         # [b, d_vocab]
 
         return final

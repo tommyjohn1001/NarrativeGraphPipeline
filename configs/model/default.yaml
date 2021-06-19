@@ -7,7 +7,6 @@ n_paras: 5
 n_layers_gru: 5
 n_layers_trans: 3
 n_heads_trans: 4
-max_len_ans: 12
 d_hid: 64
 d_bert: 768
 d_vocab: 30522

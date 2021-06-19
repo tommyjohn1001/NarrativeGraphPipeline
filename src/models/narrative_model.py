@@ -59,7 +59,7 @@ class NarrativeModel(plt.LightningModule):
 
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
         self.datamodule = datamodule
-        self.teacher_forcing_ratio = torch.nn.parameter.Parameter(1)
+        self.teacher_forcing_ratio = torch.nn.parameter.Parameter(torch.tensor(1, dtype=torch.float16))
 
         #############################
         # Define model
@@ -78,11 +78,14 @@ class NarrativeModel(plt.LightningModule):
             device=self.device,
         )
         self.ans_infer = BertDecoder(
-            seq_len_ans,
-            d_bert,
-            d_vocab,
-            self.bert_tokenizer,
-            self.embd_layer,
+            seq_len_para=seq_len_para,
+            seq_len_ans=seq_len_ans,
+            d_vocab=d_vocab,
+            n_paras=n_paras,
+            d_bert=d_bert,
+            d_hid=d_hid,
+            cls_tok_id=self.bert_tokenizer.cls_token_id,
+            embd_layer=self.embd_layer,
         )
 
         ## Freeeze some parameters
@@ -130,6 +133,9 @@ class NarrativeModel(plt.LightningModule):
         """
         pred = self.process_sent(pred)
         ref = list(map(self.process_sent, ref))
+
+        if pred == "":
+            return 0, 0, 0, 0
 
         # Calculate BLEU score
         ref_ = [x.split() for x in ref]
@@ -193,13 +199,14 @@ class NarrativeModel(plt.LightningModule):
         # Generate answer
         ####################
         if not is_valid:
-            teacher_forcing_ratio = self.teacher_forcing_ratio
+            teacher_forcing_ratio = self.teacher_forcing_ratio.item()
         else:
             teacher_forcing_ratio = 0
         pred = self.ans_infer.do_train(
             Y=Y,
             ans_ids=ans_ids,
             ans_mask=ans_mask,
+            context_ids=context_ids,
             teacher_forcing_ratio=teacher_forcing_ratio,
         )
         # pred: [b, seq_len_ans, d_vocab_ex]
@@ -241,10 +248,12 @@ class NarrativeModel(plt.LightningModule):
         prediction = [
             {
                 "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ans1": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                "ans2": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                "ref": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                ],
             }
-            for pred_, ans1_, ans2_ in zip(prediction, ans1_ids, ans2_ids)
+            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
         ]
 
         return {"loss": loss, "pred": prediction}
@@ -315,10 +324,12 @@ class NarrativeModel(plt.LightningModule):
         prediction = [
             {
                 "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ans1": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                "ans2": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                "ref": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                ],
             }
-            for pred_, ans1_, ans2_ in zip(prediction, ans1_ids, ans2_ids)
+            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
         ]
 
         return {"loss": loss, "pred": prediction}

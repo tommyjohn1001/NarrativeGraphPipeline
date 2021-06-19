@@ -32,11 +32,12 @@ class MemoryBasedReasoning(torch_nn.Module):
         self.d_hid = d_hid
 
         self.trans_enc = CustomTransEnc(
-            CustomTransEncLayer(d_model=d_hid, nhead=n_heads_trans),
+            CustomTransEncLayer(d_model=d_hid * 2, nhead=n_heads_trans),
             n_layers_trans,
             seq_len_para,
-            d_hid,
+            d_hid * 2,
         )
+
         self.memory = Memory(seq_len_para, n_layers_gru, d_hid, n_paras, device)
 
         self.lin1 = torch_nn.Linear(d_bert, d_hid, bias=False)

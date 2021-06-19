@@ -184,17 +184,17 @@ class Memory(torch_nn.Module):
     ):
         super().__init__()
 
-        self.d_hid = d_hid
+        self.d_hid_ = d_hid * 2
         self.seq_len_para = seq_len_para
 
         self.memory = Parameter(
-            torch.zeros((n_paras, seq_len_para, d_hid * 2), device=device),
+            torch.zeros((n_paras, seq_len_para, self.d_hid_), device=device),
             requires_grad=False,
         )
 
-        self.linear1 = torch_nn.Linear(d_hid, d_hid, bias=False)
-        self.linear2 = torch_nn.Linear(d_hid, d_hid, bias=False)
-        self.linear_gate = torch_nn.Linear(d_hid, d_hid, bias=True)
+        self.linear1 = torch_nn.Linear(self.d_hid_, self.d_hid_, bias=False)
+        self.linear2 = torch_nn.Linear(self.d_hid_, self.d_hid_, bias=False)
+        self.linear_gate = torch_nn.Linear(self.d_hid_, self.d_hid_, bias=True)
         self.biGRU_mask = torch_nn.GRU(
             d_hid,
             d_hid // 2,
@@ -202,6 +202,7 @@ class Memory(torch_nn.Module):
             batch_first=True,
             bidirectional=True,
         )
+        self.lin_mask = torch_nn.Linear(d_hid, self.d_hid_)
 
     def forward(self):
         return
@@ -228,35 +229,36 @@ class Memory(torch_nn.Module):
         tmp = gate * ques_para + (1 - gate) * self.memory[nth_para]
         self.memory[nth_para] = tmp.detach()
 
-    def get_final_memory(self, ques, paras, paras_mask):
-        # ques      : [b, seq_len_ques, d_hid * 2]
-        # paras     : [b, n_paras, seq_len_para, d_hid * 2]
-        # paras_mask: [b, n_paras, seq_len_para]
+    def get_final_memory(self, ques, context, context_mask):
+        # ques      : [b, seq_len_ques, d_hid]
+        # context   : [b, n_paras, seq_len_para, d_hid]
+        # context_mask: [b, n_paras, seq_len_para]
 
-        b, n_paras, seq_len_para, _ = paras.shape
+        b, n_paras, seq_len_para, _ = context.shape
 
         #########################
-        # Calculate CoAttention matrix w.r.t. ques and paras
+        # Calculate CoAttention matrix w.r.t. ques and context
         # to infer attentive mask
         #########################
-        paras_ = paras.reshape(-1, seq_len_para, self.d_hid * 2)
-        # paras_len = torch.sum(paras_mask, dim=2).reshape(-1).to("cpu")
-        # paras_    : [b*n_paras, seq_len_para, d_hid * 2]
-        # paras_mask: [b*n_paras]
+        context_ = context.reshape(-1, seq_len_para, self.d_hid_ // 2)
+        # [b*n_paras, seq_len_para, d_hid]
+        # paras_len = torch.sum(context_mask, dim=2).reshape(-1).to("cpu")
+        # context_    : [b*n_paras, seq_len_para, d_hid * 2]
+        # context_mask: [b*n_paras]
 
         # for i in range(paras_len.shape[0]):
         #     if paras_len[i] == 0:
         #         paras_len[i] = 1
 
-        # tmp     = torch_nn.utils.rnn.pack_padded_sequence(paras_, paras_len, batch_first=True,
+        # tmp     = torch_nn.utils.rnn.pack_padded_sequence(context_, paras_len, batch_first=True,
         #                                                   enforce_sorted=False)
         # tmp     = self.biGRU_mask(tmp)[0]
-        # paras_  = torch_nn.utils.rnn.pad_packed_sequence(tmp, batch_first=True)[0]
-        paras_ = self.biGRU_mask(paras_)[0]
-        # [b*n_paras, seq_len_para, d_hid * 2]
+        # context_  = torch_nn.utils.rnn.pad_packed_sequence(tmp, batch_first=True)[0]
+        context_ = self.biGRU_mask(context_)[0]
+        # [b*n_paras, seq_len_para, d_hid]
 
-        paras_first = paras_[:, 0, :].reshape(b, n_paras, -1)
-        # [b, n_paras, d_hid * 2]
+        paras_first = context_[:, 0, :].reshape(b, n_paras, -1)
+        # [b, n_paras, d_hid]
 
         ## Calculate Affinity matrix
         A = torch.bmm(ques, paras_first.transpose(1, 2)).softmax(dim=1)
@@ -266,10 +268,12 @@ class Memory(torch_nn.Module):
         # Infer attentive mask from Affinity matrix
         #########################
         attentive_mask = torch.bmm(A.transpose(1, 2), ques)
-        # [b, n_paras, d_hid * 2]
+        # [b, n_paras, d_hid]
 
         ## Apply some transformations to mask
-        attentive_mask = attentive_mask.sum(dim=0).softmax(0)
+        attentive_mask = attentive_mask.sum(dim=0)
+        # [n_paras, d_hid]
+        attentive_mask = self.lin_mask(attentive_mask).softmax(0)
         # [n_paras, d_hid * 2]
 
         attentive_mask = attentive_mask.unsqueeze(1).repeat(1, seq_len_para, 1)
