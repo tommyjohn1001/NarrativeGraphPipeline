@@ -1,11 +1,12 @@
 from random import sample
-import glob, ast, gc
+import glob, ast
 
 from torch.utils.data import Dataset
 import torch
 from transformers import BertTokenizer
 import pandas as pd
 import numpy as np
+
 
 from src.utils.utils import ParallelHelper
 
@@ -19,9 +20,9 @@ class NarrativeDataset(Dataset):
         size_dataset: int,
         size_shard: int,
         seq_len_ques: int = 42,
-        seq_len_para: int = 162,
-        seq_len_ans: int = 42,
-        n_paras: int = 30,
+        seq_len_para: int = 170,
+        seq_len_ans: int = 15,
+        n_paras: int = 5,
         num_worker: int = 1,
     ):
 
@@ -32,24 +33,21 @@ class NarrativeDataset(Dataset):
         self.n_paras = n_paras
         self.num_workers = num_worker
         self.size_dataset = size_dataset
-        self.size_shard = size_shard
 
         path_data = path_data.replace("[SPLIT]", split).replace("[SHARD]", "*")
         self.paths = sorted(glob.glob(path_data))
 
-        ## NOTE: Instead of own vocab, BERT vocab is used
-        # self.tokenizer = CustomBertTokenizer(path_vocab)
         self.tokenizer = BertTokenizer.from_pretrained(path_bert)
 
         self.curent_ith_file = -1
 
-        self.ques = None
+        self.ques_ids = None
         self.ques_mask = None
-        self.ans1 = None
-        self.ans2 = None
+        self.ans1_ids = None
+        self.ans2_ids = None
         self.ans1_mask = None
-        self.paras = None
-        self.paras_mask = None
+        self.context_ids = None
+        self.context_mask = None
 
         self.exchange_rate = 0
 
@@ -60,8 +58,10 @@ class NarrativeDataset(Dataset):
         if torch.is_tensor(indx):
             indx = indx.tolist()
 
-        ith_file = indx // self.size_shard
-        indx = indx % self.size_shard
+        size_shard = self.size_dataset // 8
+
+        ith_file = indx // size_shard
+        indx = indx % size_shard
 
         # Check nth file and reload dataset if needed
         if ith_file != self.curent_ith_file:
@@ -74,13 +74,13 @@ class NarrativeDataset(Dataset):
         return {
             # 'docId'         : self.docId[indx],
             # 'ques_plain'    : self.ques_plain[indx],
-            "ques": self.ques[indx],
+            "ques_ids": self.ques_ids[indx],
             "ques_mask": self.ques_mask[indx],
-            "ans1": self.ans1[indx],
-            "ans2": self.ans2[indx],
+            "ans1_ids": self.ans1_ids[indx],
+            "ans2_ids": self.ans2_ids[indx],
             "ans1_mask": self.ans1_mask[indx],
-            "paras": self.paras[indx],
-            "paras_mask": self.paras_mask[indx],
+            "context_ids": self.context_ids[indx],
+            "context_mask": self.context_mask[indx],
         }
 
     def _get_context(self, En, Hn):
@@ -109,7 +109,7 @@ class NarrativeDataset(Dataset):
             return_tensors="np",
             return_token_type_ids=False,
         )
-        ques = encoded["input_ids"][0]
+        ques_ids = encoded["input_ids"][0]
         ques_mask = encoded["attention_mask"][0]
 
         ###########################
@@ -131,7 +131,7 @@ class NarrativeDataset(Dataset):
             return_tensors="np",
             return_token_type_ids=False,
         )
-        ans1 = encoded["input_ids"][0]
+        ans1_ids = encoded["input_ids"][0]
         ans1_mask = encoded["attention_mask"][0]
 
         encoded = self.tokenizer(
@@ -142,7 +142,7 @@ class NarrativeDataset(Dataset):
             return_tensors="np",
             return_token_type_ids=False,
         )
-        ans2 = encoded["input_ids"][0]
+        ans2_ids = encoded["input_ids"][0]
 
         ###########################
         # Process context
@@ -153,8 +153,8 @@ class NarrativeDataset(Dataset):
         contx = self._get_context(En, Hn)
 
         # Process context
-        paras = np.zeros((self.n_paras, self.seq_len_para), dtype=np.int)
-        paras_mask = np.zeros((self.n_paras, self.seq_len_para), dtype=np.int)
+        context_ids = np.zeros((self.n_paras, self.seq_len_para), dtype=np.int)
+        context_mask = np.zeros((self.n_paras, self.seq_len_para), dtype=np.int)
         for ith, para in enumerate(contx):
             encoded = self.tokenizer(
                 para,
@@ -164,37 +164,37 @@ class NarrativeDataset(Dataset):
                 return_tensors="np",
                 return_token_type_ids=False,
             )
-            paras[ith] = encoded["input_ids"]
-            paras_mask[ith] = encoded["attention_mask"]
+            context_ids[ith] = encoded["input_ids"]
+            context_mask[ith] = encoded["attention_mask"]
 
         return {
-            "ques": ques,
+            "ques_ids": ques_ids,
             "ques_mask": ques_mask,
-            "ans1": ans1,
-            "ans2": ans2,
+            "ans1_ids": ans1_ids,
+            "ans2_ids": ans2_ids,
             "ans1_mask": ans1_mask,
-            "paras": paras,
-            "paras_mask": paras_mask,
+            "context_ids": context_ids,
+            "context_mask": context_mask,
         }
 
     def read_datasetfile(self, path_file):
         # NOTE: In future, when data format is Parquet, this line must be fixed
-        df = pd.read_csv(path_file, index_col=None, header=0)
+        df = pd.read_parquet(path_file, index_col=None, header=0)
 
         # self.docId          = []
         # self.ques_plain     = []
-        self.ques = []
+        self.ques_ids = []
         self.ques_mask = []
-        self.ans1 = []
-        self.ans2 = []
+        self.ans1_ids = []
+        self.ans2_ids = []
         self.ans1_mask = []
-        self.paras = []
-        self.paras_mask = []
+        self.context_ids = []
+        self.context_mask = []
 
         # gc.collect()
 
         ######################
-        # Fill self.ques, self.ans1,  self.ans2,
+        # Fill self.ques_ids, self.ans1_ids,  self.ans2_ids,
         # answers' mask and index
         ######################
         if self.num_workers > 1:
@@ -210,13 +210,13 @@ class NarrativeDataset(Dataset):
         for entry in entries:
             # self.docId.append(entry['docId'])
             # self.ques_plain.append(entry['ques_plain'])
-            self.ques.append(entry["ques"])
+            self.ques_ids.append(entry["ques_ids"])
             self.ques_mask.append(entry["ques_mask"])
-            self.ans1.append(entry["ans1"])
-            self.ans2.append(entry["ans2"])
+            self.ans1_ids.append(entry["ans1_ids"])
+            self.ans2_ids.append(entry["ans2_ids"])
             self.ans1_mask.append(entry["ans1_mask"])
-            self.paras.append(entry["paras"])
-            self.paras_mask.append(entry["paras_mask"])
+            self.context_ids.append(entry["context_ids"])
+            self.context_mask.append(entry["context_mask"])
 
     def switch_answerability(self):
         if self.exchange_rate == 1:

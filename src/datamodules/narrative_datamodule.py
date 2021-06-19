@@ -15,13 +15,12 @@ class NarrativeDataModule(plt.LightningDataModule):
         path_data: str,
         path_bert: str,
         sizes_dataset: dict,
-        sizes_shard: dict,
         batch_size: int = 5,
         seq_len_ques: int = 42,
         len_para_processing: int = 120,
-        seq_len_para: int = 162,
+        seq_len_para: int = 170,
         seq_len_ans: int = 42,
-        n_paras: int = 30,
+        n_paras: int = 5,
         num_workers: int = 4,
     ):
 
@@ -39,7 +38,6 @@ class NarrativeDataModule(plt.LightningDataModule):
         self.path_bert = path_bert
         self.num_workers = num_workers
         self.sizes_dataset = sizes_dataset
-        self.sizes_shard = sizes_shard
 
         self.data_train = None
         self.data_test = None
@@ -73,23 +71,14 @@ class NarrativeDataModule(plt.LightningDataModule):
         }
         if stage == "fit":
             self.data_train = NarrativeDataset(
-                "train",
-                size_dataset=self.sizes_dataset["train"],
-                size_shard=self.sizes_shard["train"],
-                **dataset_args
+                "train", size_dataset=self.sizes_dataset["train"], **dataset_args
             )
             self.data_valid = NarrativeDataset(
-                "valid",
-                size_dataset=self.sizes_dataset["valid"],
-                size_shard=self.sizes_shard["valid"],
-                **dataset_args
+                "valid", size_dataset=self.sizes_dataset["valid"], **dataset_args
             )
         else:
             self.data_test = NarrativeDataset(
-                "test",
-                size_dataset=self.sizes_dataset["test"],
-                size_shard=self.sizes_shard["test"],
-                **dataset_args
+                "test", size_dataset=self.sizes_dataset["test"], **dataset_args
             )
 
     def train_dataloader(self):

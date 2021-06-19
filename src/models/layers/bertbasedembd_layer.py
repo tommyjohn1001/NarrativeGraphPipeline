@@ -20,40 +20,40 @@ class BertBasedEmbedding(torch_nn.Module):
     def forward(self):
         return
 
-    def encode_ques_para(self, ques, paras, ques_mask, paras_mask):
-        # ques          : [b, seq_len_ques]
-        # paras         : [b, n_paras, seq_len_para]
-        # ques_mask     : [b, seq_len_ques]
-        # paras_mask    : [b, n_paras, seq_len_para]
+    def encode_ques_para(self, ques_ids, context_ids, ques_mask, context_mask):
+        # ques: [b, seq_len_ques]
+        # context_ids: [b, n_paras, seq_len_para]
+        # ques_mask: [b, seq_len_ques]
+        # context_mask: [b, n_paras, seq_len_para]
 
-        b, _, seq_len_para = paras.shape
+        b, _, seq_len_para = context_ids.shape
 
         #########################
         # Contextual embedding for question with BERT
         #########################
-        ques = self.bert_emb(input_ids=ques, attention_mask=ques_mask)[0]
+        ques = self.bert_emb(input_ids=ques_ids, attention_mask=ques_mask)[0]
         # [b, seq_len_ques, d_bert]
 
         #########################
-        # Contextual embedding for paras with BERT
+        # Contextual embedding for context with BERT
         #########################
         # Convert to another shape to fit with
         # input shape of self.embedding
-        paras = paras.view((-1, seq_len_para))
-        paras_mask = paras_mask.view((-1, seq_len_para))
-        # paras     : [b*n_paras, seq_len_para, d_bert]
-        # paras_mask: [b*n_paras, seq_len_para]
+        context = context_ids.view((-1, seq_len_para))
+        context_mask = context_mask.view((-1, seq_len_para))
+        # context     : [b*n_paras, seq_len_para, d_bert]
+        # context_mask: [b*n_paras, seq_len_para]
 
-        paras = self.bert_emb(input_ids=paras, attention_mask=paras_mask)[0]
+        context = self.bert_emb(input_ids=context, attention_mask=context_mask)[0]
         # [b*n_paras, seq_len_para, d_bert]
-        paras = paras.view((b, -1, seq_len_para, self.d_bert))
+        context = context.view((b, -1, seq_len_para, self.d_bert))
         # [b, n_paras, seq_len_para, d_bert]
 
-        return ques, paras
+        return ques, context
 
-    def encode_ans(self, ans, ans_mask):
-        # ans           : [b, seq_len_ans]
-        # ans_mask      : [b, seq_len_ans]
+    def encode_ans(self, ans_ids, ans_mask):
+        # ans_ids : [b, seq_len_ans]
+        # ans_mask : [b, seq_len_ans]
 
-        return self.bert_emb(input_ids=ans, attention_mask=ans_mask)[0]
+        return self.bert_emb(input_ids=ans_ids, attention_mask=ans_mask)[0]
         # [b, seq_len_ans, d_bert]

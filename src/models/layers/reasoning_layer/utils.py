@@ -36,7 +36,7 @@ class CustomTransEnc(torch_nn.Module):
         self,
         enc_layer,
         num_layers,
-        seq_len_para: int = 162,
+        seq_len_para: int = 170,
         d_hid: int = 64,
         norm=None,
     ):
@@ -176,10 +176,10 @@ class CustomTransEncLayer(torch_nn.Module):
 class Memory(torch_nn.Module):
     def __init__(
         self,
-        seq_len_para: int = 162,
+        seq_len_para: int = 170,
         n_layers_gru: int = 5,
         d_hid: int = 64,
-        n_paras: int = 30,
+        n_paras: int = 5,
         device: Any = None,
     ):
         super().__init__()
