@@ -27,10 +27,10 @@ class NarrativeModel(plt.LightningModule):
         self,
         batch_size: int,
         seq_len_ques: int = 42,
-        seq_len_para: int = 162,
-        seq_len_ans: int = 42,
-        n_nodes: int = 435,
-        n_edges: int = 3120,
+        seq_len_para: int = 170,
+        seq_len_ans: int = 15,
+        n_nodes: int = 10,
+        n_edges: int = 40,
         n_gru_layers: int = 5,
         max_len_ans: int = 12,
         d_hid: int = 64,
@@ -113,19 +113,6 @@ class NarrativeModel(plt.LightningModule):
     # FOR TRAINING PURPOSE
     ####################################################################
 
-    def calc_loss(self, pred, ans):
-        # pred: [b, seq_len_ans, d_vocab]
-        # ans : [b, seq_len_ans]]
-
-        d_vocab = pred.shape[2]
-
-        pred_flat = pred[:, :-1, :].reshape(-1, d_vocab)
-        ans_flat = ans[:, 1:].reshape(-1)
-
-        loss = self.criterion(pred_flat, ans_flat)
-
-        return loss
-
     def process_sent(self, sent: str):
         return re.sub(r"(\[PAD\]|\[CLS\]|\[SEP\]|\[UNK\]|\[MASK\])", "", sent).strip()
 
@@ -174,29 +161,40 @@ class NarrativeModel(plt.LightningModule):
             rouge_l if rouge_l > EPSILON else 0,
         )
 
-    def model(self, ques, ques_mask, ans, ans_mask, paras, paras_mask):
+    def model(
+        self,
+        ques_ids,
+        ques_mask,
+        ans_ids,
+        ans_mask,
+        context_ids,
+        context_mask,
+    ):
         # ques       : [b, seq_len_ques]
         # ques_mask  : [b, seq_len_ques]
-        # paras      : [b, n_paras, seq_len_para]
-        # paras_mask : [b, n_paras, seq_len_para]
+        # context_ids  : [b, n_paras, seq_len_para]
+        # context_mask : [b, n_paras, seq_len_para]
         # ans        : [b, seq_len_ans]
         # ans_mask   : [b, seq_len_ans]
 
         ####################
-        # Embed question, paras and answer
+        # Embed question, context and answer
         ####################
-        ques, paras = self.embd_layer.encode_ques_para(
-            ques, paras, ques_mask, paras_mask
+        ques, context = self.embd_layer.encode_ques_para(
+            ques_ids=ques_ids,
+            context_ids=context_ids,
+            ques_mask=ques_mask,
+            context_mask=context_mask,
         )
-        ans = self.embd_layer.encode_ans(ans, ans_mask)
+        ans = self.embd_layer.encode_ans(ans_ids=ans_ids, ans_mask=ans_mask)
         # ques : [b, seq_len_ques, d_bert]
-        # paras: [b, n_paras, d_bert]
+        # context: [b, n_paras, d_bert]
         # ans  : [b, seq_len_ans, d_bert]
 
         ####################
         # Do reasoning
         ####################
-        Y = self.reasoning(ques, paras)
+        Y = self.reasoning(ques, context)
         # [b, seq_len_ans, d_bert]
 
         ####################
@@ -209,29 +207,34 @@ class NarrativeModel(plt.LightningModule):
         return pred
 
     def training_step(self, batch: Any, batch_idx: int):
-        ques = batch["ques"]
+        ques_ids = batch["ques_ids"]
         ques_mask = batch["ques_mask"]
-        ans1 = batch["ans1"]
-        ans2 = batch["ans2"]
+        ans1_ids = batch["ans1_ids"]
+        ans2_ids = batch["ans2_ids"]
         ans1_mask = batch["ans1_mask"]
-        paras = batch["paras"]
-        paras_mask = batch["paras_mask"]
+        context_ids = batch["context_ids"]
+        context_mask = batch["context_mask"]
 
-        pred = self.model(ques, ques_mask, ans1, ans1_mask, paras, paras_mask)
+        pred = self.model(
+            ques_ids, ques_mask, ans1_ids, ans1_mask, context_ids, context_mask
+        )
+        # [b, d_vocab, seq_len_ans]
 
-        loss = self.calc_loss(pred, ans1)
+        loss = self.criterion(pred, ans1_ids)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
-        _, prediction = torch.topk(torch_F.log_softmax(pred, dim=2), 1, dim=2)
+        _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
 
         prediction = [
             {
                 "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ans1": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                "ans2": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                "ref": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                ],
             }
-            for pred_, ans1_, ans2_ in zip(prediction, ans1, ans2)
+            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
         ]
 
         return {"loss": loss, "pred": prediction}
@@ -243,39 +246,42 @@ class NarrativeModel(plt.LightningModule):
             json.dump(outputs["pred"], pred_file, indent=2, ensure_ascii=False)
 
     def test_step(self, batch: Any, batch_idx: int):
-        ques = batch["ques"]
+        ques_ids = batch["ques_ids"]
         ques_mask = batch["ques_mask"]
-        ans1 = batch["ans1"]
+        ans1_ids = batch["ans1_ids"]
         ans1_mask = batch["ans1_mask"]
-        paras = batch["paras"]
-        paras_mask = batch["paras_mask"]
+        context_ids = batch["context_ids"]
+        context_mask = batch["context_mask"]
 
-        pred = self.model(ques, ques_mask, ans1, ans1_mask, paras, paras_mask)
-        # pred: [b, seq_len_ans, d_vocab]
+        pred = self.model(
+            ques_ids, ques_mask, ans1_ids, ans1_mask, context_ids, context_mask
+        )
 
-        loss = self.calc_loss(pred, ans1)
+        loss = self.criterion(pred, ans1_ids)
 
-        self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return loss
 
     def validation_step(self, batch: Any, batch_idx: int):
-        ques = batch["ques"]
+        ques_ids = batch["ques_ids"]
         ques_mask = batch["ques_mask"]
-        ans1 = batch["ans1"]
-        ans2 = batch["ans2"]
+        ans1_ids = batch["ans1_ids"]
+        ans2_ids = batch["ans2_ids"]
         ans1_mask = batch["ans1_mask"]
-        paras = batch["paras"]
-        paras_mask = batch["paras_mask"]
+        context_ids = batch["context_ids"]
+        context_mask = batch["context_mask"]
 
-        pred = self.model(ques, ques_mask, ans1, ans1_mask, paras, paras_mask)
-        # pred: [b, seq_len_ans, d_vocab]
+        pred = self.model(
+            ques_ids, ques_mask, ans1_ids, ans1_mask, context_ids, context_mask
+        )
+        # [b, d_vocab, seq_len_ans]
 
-        loss = self.calc_loss(pred, ans1)
+        loss = self.criterion(pred, ans1_ids)
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
-        _, prediction = torch.topk(torch_F.log_softmax(pred, dim=2), 1, dim=2)
+        _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
 
         prediction = [
             {
@@ -285,7 +291,7 @@ class NarrativeModel(plt.LightningModule):
                     " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
                 ],
             }
-            for pred_, ans1_, ans2_ in zip(prediction, ans1, ans2)
+            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
         ]
 
         return {"loss": loss, "pred": prediction}
@@ -328,27 +334,30 @@ class NarrativeModel(plt.LightningModule):
     #########################################
     # FOR PREDICTION PURPOSE
     #########################################
-    def forward(self, ques, ques_mask, paras, paras_mask):
-        # ques       : [b, seq_len_ques]
+    def forward(self, ques_ids, ques_mask, context_ids, context_mask):
+        # ques_ids       : [b, seq_len_ques]
         # ques_mask  : [b, seq_len_ques]
-        # paras      : [b, n_paras, seq_len_para]
+        # context_ids      : [b, n_paras, seq_len_para]
         # paras_mask : [b, n_paras, seq_len_para]
 
-        b = ques.shape[0]
+        b = ques_ids.size(0)
 
         ####################
-        # Embed question, paras and answer
+        # Embed question, context
         ####################
-        ques, paras = self.embd_layer.encode_ques_para(
-            ques, paras, ques_mask, paras_mask
+        ques, context = self.embd_layer.encode_ques_para(
+            ques_ids=ques_ids,
+            context_ids=context_ids,
+            ques_mask=ques_mask,
+            context_mask=context_mask,
         )
         # ques : [b, seq_len_ques, d_bert]
-        # paras: [b, n_paras, d_bert]
+        # context: [b, n_paras, d_bert]
 
         ####################
         # Do reasoning
         ####################
-        Y = self.reasoning(ques, paras)
+        Y = self.reasoning(ques, context)
         # [b, seq_len_ans, d_bert]
 
         ####################
@@ -376,6 +385,8 @@ class NarrativeModel(plt.LightningModule):
 
         beam_search = BeamSearchOwn(
             beam_size=self.beam_size,
+            init_tok=self.bert_tokenizer.cls_token_id,
+            stop_tok=self.bert_tokenizer.sep_token_id,
             max_len=self.max_len_ans,
             model=self.generate_own,
             no_repeat_ngram_size=self.n_gram_beam,
@@ -387,7 +398,7 @@ class NarrativeModel(plt.LightningModule):
 
             outputs.append(indices)
 
-        outputs = torch.LongTensor(outputs, device=self.device)
+        outputs = torch.tensor(outputs, device=self.device, dtype=torch.long)
 
         return outputs
 
@@ -413,9 +424,14 @@ class NarrativeModel(plt.LightningModule):
         # decoder_input_ids: [seq_len<=200]
         # encoder_outputs  : [seq_len_ans, d_bert]
 
-        decoder_input_ids = torch.LongTensor(decoder_input_ids).unsqueeze(0)
+        decoder_input_ids = (
+            torch.LongTensor(decoder_input_ids)
+            .type_as(encoder_outputs)
+            .long()
+            .unsqueeze(0)
+        )
 
-        decoder_input_mask = torch.ones(decoder_input_ids.shape)
+        decoder_input_mask = torch.ones(decoder_input_ids.shape, device=self.device)
         decoder_input_embd = self.embd_layer.encode_ans(
             decoder_input_ids, decoder_input_mask
         )
@@ -437,22 +453,29 @@ class NarrativeModel(plt.LightningModule):
         batch_idx: int,
         dataloader_idx: Optional[int],
     ) -> Any:
-        ques = batch["ques"]
+        ques_ids = batch["ques_ids"]
         ques_mask = batch["ques_mask"]
-        paras = batch["paras"]
-        paras_mask = batch["paras_mask"]
-        ans1 = batch["ans1"]
-        ans2 = batch["ans2"]
+        ans1_ids = batch["ans1_ids"]
+        ans2_ids = batch["ans2_ids"]
+        context_ids = batch["context_ids"]
+        context_mask = batch["context_mask"]
 
-        pred = self(ques, ques_mask, paras, paras_mask)
+        prediction = self(
+            ques_ids=ques_ids,
+            ques_mask=ques_mask,
+            context_ids=context_ids,
+            context_mask=context_mask,
+        )
 
         prediction = [
             {
                 "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ans1": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                "ans2": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                "ref": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                ],
             }
-            for pred_, ans1_, ans2_ in zip(pred, ans1, ans2)
+            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
         ]
 
         return prediction

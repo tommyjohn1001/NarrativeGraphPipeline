@@ -10,7 +10,7 @@ import numpy as np
 
 
 class GraphLayer(torch_nn.Module):
-    def __init__(self, d_hid: int = 64, d_graph: int = 2048, n_nodes: int = 435):
+    def __init__(self, d_hid: int = 64, d_graph: int = 2048, n_nodes: int = 10):
 
         super().__init__()
 
@@ -99,10 +99,8 @@ class GraphLayer(torch_nn.Module):
             edge_indx_ = edge_indx[b, :, : edge_len[b].item()].squeeze(0)
 
             ## 2.2. Increment index of that edge indx by accum
-            increment = torch.Tensor([accum], device=node_feat.device).repeat(
-                edge_indx_.shape
-            )
-            edge_indx_ = edge_indx_ + increment
+            increment = torch.Tensor([accum]).repeat(edge_indx_.shape)
+            edge_indx_ = edge_indx_ + increment.to(edge_indx_.get_device())
 
             ## 2.3. Concate into 'final_edge_indx'
             if final_edge_indx is None:
@@ -121,9 +119,9 @@ class Memory(torch_nn.Module):
     def __init__(
         self,
         batch_size: int = 5,
-        n_nodes: int = 435,
+        n_nodes: int = 10,
         d_hid: int = 64,
-        n_edges: int = 3120,
+        n_edges: int = 40,
     ):
 
         super().__init__()
@@ -162,7 +160,7 @@ class Memory(torch_nn.Module):
         )
 
     def gen_edges(self):
-        edge_pair = list(combinations(range(435), 2))
+        edge_pair = list(combinations(range(self.n_nodes), 2))
         edges = sample(edge_pair, self.n_edges // 2)
 
         vertex_s, vertex_d = [], []

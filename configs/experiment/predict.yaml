@@ -7,11 +7,9 @@ defaults:
   - override /callbacks: null
   - override /logger: null
 
-override /PATH: null
 
 task: predict
 
-seed: 307
 
 trainer:
   _target_: pytorch_lightning.Trainer
@@ -22,7 +20,8 @@ trainer:
   auto_lr_find: False
   terminate_on_nan: true
   auto_scale_batch_size: False
-
+  accelerator: null
+  precision: 16
   weights_summary: "top"
   progress_bar_refresh_rate: 10
   resume_from_checkpoint: ${PATH.checkpoint}
@@ -32,10 +31,10 @@ model:
 
   batch_size: ${batch_size}
   seq_len_ques: 42
-  seq_len_para: 162
-  seq_len_ans: 42
-  n_nodes: 435
-  n_edges: 3120
+  seq_len_para: 170
+  seq_len_ans: 15
+  n_nodes: 10
+  n_edges: 40
   n_gru_layers: 5
   max_len_ans: 12
   d_hid: 64
@@ -59,17 +58,18 @@ datamodule:
   batch_size: ${batch_size}
   num_workers: ${num_workers}
   seq_len_ques: 42
-  seq_len_para: 162
-  len_para_processing: 120
-  seq_len_ans: 42
+  seq_len_para: 170
+  seq_len_ans: 15
   sizes_dataset:
-    train: 32744
-    test: 10552
-    valid: 3456
-  sizes_shard:
-    train: 4093
-    test: 1319
-    valid: 432
+    train: 32747
+    test: 10557
+    valid: 3461
+
+  path_bert: ${PATH.bert}
+  path_data: ${PATH.data}
+  path_raw_data: ${PATH.raw_data}
+  path_processed_contx: ${PATH.processed_contx}
+
 
   path_bert: ${PATH.bert}
   path_data: ${PATH.data}

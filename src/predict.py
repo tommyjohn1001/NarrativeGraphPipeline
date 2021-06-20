@@ -42,7 +42,8 @@ def predict(config: DictConfig) -> Optional[float]:
 
     # Init Lightning model
     log.info(f"Instantiating model <{config.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(config.model, datamodule)
+    model_kwargs = {"datamodule": datamodule}
+    model: LightningModule = hydra.utils.instantiate(config.model, **model_kwargs)
 
     # Init Lightning callbacks
     callbacks: List[Callback] = []
@@ -80,7 +81,6 @@ def predict(config: DictConfig) -> Optional[float]:
     # Trigger predicting
     log.info("Starting predicting!")
     trainer.predict(model=model, datamodule=datamodule)
-
 
     # Make sure everything closed properly
     log.info("Finalizing!")
