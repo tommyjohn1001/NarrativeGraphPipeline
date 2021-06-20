@@ -59,7 +59,9 @@ class NarrativeModel(plt.LightningModule):
 
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
         self.datamodule = datamodule
-        self.teacher_forcing_ratio = torch.nn.parameter.Parameter(torch.tensor(1, dtype=torch.float16))
+        self.teacher_forcing_ratio = torch.nn.parameter.Parameter(
+            torch.tensor(1, dtype=torch.float16)
+        )
 
         #############################
         # Define model
@@ -340,7 +342,10 @@ class NarrativeModel(plt.LightningModule):
         n_samples = 0
         bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
         for pair in outputs["pred"]:
-            bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_scores(**pair)
+            try:
+                bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_scores(**pair)
+            except ValueError:
+                bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
 
             bleu_1 += bleu_1_
             bleu_4 += bleu_4_

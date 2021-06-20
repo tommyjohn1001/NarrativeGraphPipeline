@@ -205,11 +205,14 @@ class ParallelHelper:
         data_allocation: object,
         num_workers: int = 4,
         desc=None,
+        show_bar=False,
     ):
         self.n_data = len(data)
+        self.show_bar = show_bar
 
         self.queue = multiprocessing.Queue()
-        # self.pbar = tqdm(total=self.n_data, desc=desc)
+        if self.show_bar:
+            self.pbar = tqdm(total=self.n_data, desc=desc)
 
         self.jobs = list()
         for ith in range(num_workers):
@@ -243,9 +246,11 @@ class ParallelHelper:
                 dataset.append(self.queue.get())
                 cnt += 1
 
-        #         self.pbar.update()
+                if self.show_bar:
+                    self.pbar.update()
 
-        # self.pbar.close()
+        if self.show_bar:
+            self.pbar.close()
 
         for job in self.jobs:
             job.terminate()

@@ -64,7 +64,7 @@ class NarrativeDataset(Dataset):
 
         if ith_file == 8:
             ith_file -= 1
-            indx = indx + size_shard + 1
+            indx = indx + size_shard
 
         # Check nth file and reload dataset if needed
         if ith_file != self.curent_ith_file:

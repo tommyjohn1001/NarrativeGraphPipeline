@@ -167,6 +167,7 @@ class ContextProcessor:
                 documents[documents["set"] == split],
                 lambda d, l, h: d.iloc[l:h],
                 self.num_workers,
+                show_bar=True,
             ).launch()
 
 
@@ -209,22 +210,12 @@ class EntryProcessor:
 
         scores = cosine_similarity(query_, wm_).squeeze(0)
 
-        goldens = set()
+        # Sort scores in descending and get corresponding indices
+        score_indx = [(i, s_) for i, s_ in enumerate(scores.tolist())]
+        score_indx.sort(key=lambda x: x[1], reverse=True)
+        indices = [indx for indx, _ in score_indx]
 
-        for ith, score in enumerate(scores):
-            if score > 0:
-                goldens.add(ith)
-                if len(goldens) >= self.n_paras:
-                    break
-
-        if len(goldens) < self.n_paras:
-            for ith, score in enumerate(scores):
-                if score == 0:
-                    goldens.add(ith)
-                    if len(goldens) >= self.n_paras:
-                        break
-
-        return goldens
+        return indices[: self.n_paras]
 
     def read_processed_contx(self, id_):
         path = self.path_processed_contx.replace("[ID]", id_)
@@ -298,7 +289,7 @@ class EntryProcessor:
 
                 ## Start processing (multi/single processing)
                 start_ = len(documents_) // 8 * shard
-                end_ = start_ + len(documents_) // 8 if shard < 8 else len(documents_)
+                end_ = start_ + len(documents_) // 8 if shard < 7 else len(documents_)
 
                 if self.num_workers == 1:
                     list_documents = list(
@@ -324,6 +315,7 @@ class EntryProcessor:
                         lambda d, l, h: d.iloc[l:h],
                         self.num_workers,
                         desc=f"Split {split} - shard {shard}",
+                        show_bar=True,
                     ).launch()
 
                 ## Save processed things to Parquet file
@@ -471,12 +463,21 @@ class Preprocess:
 
 if __name__ == "__main__":
     Preprocess(
-        num_workers=4,
+        num_workers=1,
         len_para_processing=150,
         n_paras=5,
-        path_raw_data="/Users/hoangle/Projects/VinAI/_data/NarrativeQA",
-        path_processed_contx="data/June18/proc_contx/[ID].json",
-        path_data="data/June18/[SPLIT]/data_[SHARD].parquet",
-        path_vocab_gen="data/June18/vocab_gen.txt",
-        path_vocab="data/June18/vocab.txt",
+        path_raw_data="/root/NarrativeQA",
+        path_processed_contx="/root/data/proc_contx/[ID].json",
+        path_data="/root/data/[SPLIT]/data_[SHARD].parquet",
+        path_vocab_gen="/root/data/vocab_gen.txt",
+        path_vocab="/root/data/vocab.txt",
     ).preprocess()
+
+    # Preprocess(
+    #     num_workers=8,
+    #     len_para_processing=150,
+    #     n_paras=5,
+    #     path_raw_data="/root/NarrativeQA",
+    #     path_processed_contx="data/proc_contx/[ID].json",
+    #     path_data="data/[SPLIT]/data_[SHARD].parquet",
+    # ).preprocess()

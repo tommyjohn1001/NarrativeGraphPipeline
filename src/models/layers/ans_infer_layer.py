@@ -104,25 +104,27 @@ class BertDecoder(torch_nn.Module):
         abstr_dist = self.lin_abstr_1(contx)
         # [b, d_vocab]
 
+        final = abstr_dist
+
         #########################
         ## Calculate extract-abstract switch and combine them
         #########################
-        switch = (
-            self.lin_swch_1(contx)
-            + self.lin_swch_2(ans[:, -1])
-            + self.lin_swch_3(decoder_output)
-        )
-        # [b, 1]
-        switch = torch.sigmoid(switch)
+        # switch = (
+        #     self.lin_swch_1(contx)
+        #     + self.lin_swch_2(ans[:, -1])
+        #     + self.lin_swch_3(decoder_output)
+        # )
+        # # [b, 1]
+        # switch = torch.sigmoid(switch)
 
-        final = switch * abstr_dist
-        # [b, d_vocab]
+        # final = switch * abstr_dist
+        # # [b, d_vocab]
 
-        # Scatter
-        extract_dist = (1 - switch) * extract_dist.squeeze(-1)
-        final = final.scatter_add(
-            dim=-1, index=context_ids, src=extract_dist.type_as(final)
-        )
+        # # Scatter
+        # extract_dist = (1 - switch) * extract_dist.squeeze(-1)
+        # final = final.scatter_add(
+        #     dim=-1, index=context_ids, src=extract_dist.type_as(final)
+        # )
         # [b, d_vocab]
 
         return final
