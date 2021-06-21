@@ -2,6 +2,14 @@
 
 ### This file contains changes and modifications during developing.
 
+## June 21 2021, 23:54
+
+- Change name of **seq*len*** to **len\_**
+- Change method of calculating loss: shift right 'ans_1' by 1
+- Increase nth epoch to start scheduled sampling to 20
+- Invent new reasoning module based on TransEncoder, Memory and CoAttention
+- Remove _PG_ module in _Decoder_
+
 ## June 19 2021, 11:46
 
 - Apply data _version 4_ for training: not removing stopwords, new HTML removing, start-end extraction

@@ -31,9 +31,9 @@ trainer:
 model:
   _target_: src.models.narrative_model.NarrativeModel
 
-  seq_len_ques: 42
-  seq_len_para: 170
-  seq_len_ans: 15
+  len_ques: 42
+  len_para: 170
+  len_ans: 15
   n_paras: 5
   n_layers_gru: 5
   n_layers_trans: 3
@@ -56,10 +56,10 @@ datamodule:
 
   batch_size: ${batch_size}
   num_workers: ${num_workers}
-  seq_len_ques: 42
-  seq_len_para: 170
+  len_ques: 42
+  len_para: 170
   len_para_processing: 120
-  seq_len_ans: 15
+  len_ans: 15
   sizes_dataset:
     train: 32747
     test: 10557

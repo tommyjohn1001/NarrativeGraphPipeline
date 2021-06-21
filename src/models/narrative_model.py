@@ -14,7 +14,7 @@ import numpy as np
 from src.datamodules.narrative_datamodule import NarrativeDataModule
 from src.models.layers.reasoning_layer.memory_layer import MemoryBasedReasoning
 from src.models.layers.bertbasedembd_layer import BertBasedEmbedding
-from src.models.layers.ans_infer_layer import BertDecoder
+from src.models.layers.ans_infer_layer import Decoder
 from src.utils.generator import GeneratorOwn
 
 EPSILON = 10e-10
@@ -23,9 +23,9 @@ EPSILON = 10e-10
 class NarrativeModel(plt.LightningModule):
     def __init__(
         self,
-        seq_len_ques: int = 42,
-        seq_len_para: int = 170,
-        seq_len_ans: int = 15,
+        len_ques: int = 42,
+        len_para: int = 170,
+        len_ans: int = 15,
         n_paras: int = 5,
         n_layers_gru: int = 4,
         n_layers_trans: int = 3,
@@ -52,7 +52,7 @@ class NarrativeModel(plt.LightningModule):
         self.beam_size = beam_size
         self.n_gram_beam = n_gram_beam
         self.switch_frequency = switch_frequency
-        self.seq_len_ans = seq_len_ans
+        self.len_ans = len_ans
 
         self.path_pred = path_pred
         self.path_train_pred = path_train_pred
@@ -68,23 +68,17 @@ class NarrativeModel(plt.LightningModule):
         #############################
         self.embd_layer = BertBasedEmbedding(d_bert=d_bert, path_bert=path_bert)
         self.reasoning = MemoryBasedReasoning(
-            seq_len_ques=seq_len_ques,
-            seq_len_para=seq_len_para,
-            seq_len_ans=seq_len_ans,
+            len_ques=len_ques,
+            len_para=len_para,
             n_paras=n_paras,
-            n_layers_gru=n_layers_gru,
             n_heads_trans=n_heads_trans,
             n_layers_trans=n_layers_trans,
             d_hid=d_hid,
-            d_bert=d_bert,
             device=self.device,
         )
-        self.ans_infer = BertDecoder(
-            seq_len_para=seq_len_para,
-            seq_len_ans=seq_len_ans,
+        self.ans_infer = Decoder(
+            len_ans=len_ans,
             d_vocab=d_vocab,
-            n_paras=n_paras,
-            d_bert=d_bert,
             d_hid=d_hid,
             cls_tok_id=self.bert_tokenizer.cls_token_id,
             embd_layer=self.embd_layer,
@@ -172,12 +166,12 @@ class NarrativeModel(plt.LightningModule):
         context_mask,
         is_valid=False,
     ):
-        # ques_ids: [b, seq_len_ques]
-        # ques_mask: [b, seq_len_ques]
-        # context_ids: [b, n_paras, seq_len_para]
-        # context_mask: [b, n_paras, seq_len_para]
-        # ans_ids: [b, seq_len_ans]
-        # ans_mask: [b, seq_len_ans]
+        # ques_ids: [b, len_ques]
+        # ques_mask: [b, len_ques]
+        # context_ids: [b, n_paras, len_para]
+        # context_mask: [b, n_paras, len_para]
+        # ans_ids: [b, len_ans]
+        # ans_mask: [b, len_ans]
 
         ####################
         # Embed question, context and answer
@@ -188,14 +182,14 @@ class NarrativeModel(plt.LightningModule):
             ques_mask=ques_mask,
             context_mask=context_mask,
         )
-        # ques : [b, seq_len_ques, d_bert]
-        # context: [b, n_paras, seq_len_para, d_bert]
+        # ques : [b, len_ques, d_bert]
+        # context: [b, n_paras, len_para, d_bert]
 
         ####################
         # Do reasoning
         ####################
         Y = self.reasoning(ques=ques, context=context, context_mask=context_mask)
-        # [b, seq_len_ans, d_hid * 4]
+        # [b, len_ans, d_hid * 4]
 
         ####################
         # Generate answer
@@ -211,7 +205,7 @@ class NarrativeModel(plt.LightningModule):
             context_ids=context_ids,
             teacher_forcing_ratio=teacher_forcing_ratio,
         )
-        # pred: [b, seq_len_ans, d_vocab_ex]
+        # pred: [b, len_ans, d_vocab_ex]
 
         return pred
 
@@ -232,9 +226,9 @@ class NarrativeModel(plt.LightningModule):
             context_ids=context_ids,
             context_mask=context_mask,
         )
-        # [b, d_vocab, seq_len_ans]
+        # [b, d_vocab, len_ans]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
         self.log(
@@ -270,9 +264,10 @@ class NarrativeModel(plt.LightningModule):
         if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
             self.datamodule.switch_answerability()
 
-            self.teacher_forcing_ratio = torch_nn.parameter.Parameter(
-                max(self.teacher_forcing_ratio - 0.3, 0)
-            )
+            if self.current_epoch >= 20:
+                self.teacher_forcing_ratio = torch_nn.parameter.Parameter(
+                    max(self.teacher_forcing_ratio - 0.3, 0)
+                )
 
     def test_step(self, batch: Any, batch_idx: int):
         ques_ids = batch["ques_ids"]
@@ -290,9 +285,9 @@ class NarrativeModel(plt.LightningModule):
             context_ids=context_ids,
             context_mask=context_mask,
         )
-        # [b, d_vocab, seq_len_ans]
+        # [b, d_vocab, len_ans]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return loss
@@ -315,9 +310,9 @@ class NarrativeModel(plt.LightningModule):
             context_mask=context_mask,
             is_valid=True,
         )
-        # pred: [b, d_vocab, seq_len_ans]
+        # pred: [b, d_vocab, len_ans]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -381,10 +376,10 @@ class NarrativeModel(plt.LightningModule):
         context_mask,
     ):
         ## TODO: Finish implementation later
-        # ques_ids    : [b, seq_len_ques]
-        # ques_mask   : [b, seq_len_ques]
-        # context_ids : [b, n_paras, seq_len_para]
-        # context_mask: [b, n_paras, seq_len_para]
+        # ques_ids    : [b, len_ques]
+        # ques_mask   : [b, len_ques]
+        # context_ids : [b, n_paras, len_para]
+        # context_mask: [b, n_paras, len_para]
 
         b = ques_mask.size()[0]
 
@@ -397,14 +392,14 @@ class NarrativeModel(plt.LightningModule):
             ques_mask=ques_mask,
             context_mask=context_mask,
         )
-        # ques : [b, seq_len_ques, d_bert]
-        # context: [b, n_paras, seq_len_para, d_bert]
+        # ques : [b, len_ques, d_bert]
+        # context: [b, n_paras, len_para, d_bert]
 
         ####################
         # Do reasoning
         ####################
         Y = self.reasoning(ques=ques, context=context, context_mask=context_mask)
-        # [b, seq_len_ans, d_hid * 4]
+        # [b, len_ans, d_hid * 4]
 
         ####################
         # Generate answer
@@ -415,7 +410,7 @@ class NarrativeModel(plt.LightningModule):
             beam_size=self.beam_size,
             init_tok=self.bert_tokenizer.cls_token_id,
             stop_tok=self.bert_tokenizer.sep_token_id,
-            max_len=self.seq_len_ans,
+            max_len=self.len_ans,
             model=self.generate,
             no_repeat_ngram_size=self.n_gram_beam,
             topk_strategy="select_mix_beam",
@@ -433,7 +428,7 @@ class NarrativeModel(plt.LightningModule):
     def generate(self, decoder_input_ids, encoder_outputs):
         ## TODO: Finish implementation later
         # decoder_input_ids: [seq_len<=200]
-        # encoder_outputs  : [n_paras, seq_len_para, d_hid * 4]
+        # encoder_outputs  : [n_paras, len_para, d_hid * 4]
 
         decoder_input_ids = (
             torch.LongTensor(decoder_input_ids)

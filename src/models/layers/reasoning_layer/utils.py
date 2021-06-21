@@ -36,7 +36,6 @@ class CustomTransEnc(torch_nn.Module):
         self,
         enc_layer,
         num_layers,
-        seq_len_para: int = 170,
         d_hid: int = 64,
         norm=None,
     ):
@@ -47,7 +46,7 @@ class CustomTransEnc(torch_nn.Module):
         self.fc = torch_nn.Sequential(
             torch_nn.Linear(d_hid, d_hid),
             torch_nn.ReLU(),
-            torch_nn.BatchNorm1d(seq_len_para),
+            torch_nn.BatchNorm1d(1),
         )
 
     def forward(
@@ -68,7 +67,7 @@ class CustomTransEnc(torch_nn.Module):
         Shape:
             see the docs in Trans class.
         """
-        output1, output2 = query, key_value
+        output1, output2 = query.transpose(0, 1), key_value.transpose(0, 1)
 
         for mod in self.layers:
             output1, output2 = mod(
@@ -79,7 +78,7 @@ class CustomTransEnc(torch_nn.Module):
             )
 
         output1 = output1.transpose(0, 1)
-        # [b, seq_len_ques + seq_len_para, d_hid]
+        # [b, len_ques + len_para, d_hid]
         output1 = self.fc(output1)
 
         return output1
@@ -173,119 +172,172 @@ class CustomTransEncLayer(torch_nn.Module):
         return query, query
 
 
-class Memory(torch_nn.Module):
+class MemoryBasedQuesRectifier(torch_nn.Module):
     def __init__(
         self,
-        seq_len_para: int = 170,
-        n_layers_gru: int = 5,
+        len_ques: int = 42,
         d_hid: int = 64,
-        n_paras: int = 5,
+        n_heads_trans: int = 8,
+        n_layers_trans: int = 8,
         device: Any = None,
     ):
         super().__init__()
 
-        self.d_hid_ = d_hid * 2
-        self.seq_len_para = seq_len_para
+        self.d_hid = d_hid
 
         self.memory = Parameter(
-            torch.zeros((n_paras, seq_len_para, self.d_hid_), device=device),
-            requires_grad=False,
+            torch.zeros((len_ques, d_hid), device=device),
+            requires_grad=True,
         )
 
-        self.linear1 = torch_nn.Linear(self.d_hid_, self.d_hid_, bias=False)
-        self.linear2 = torch_nn.Linear(self.d_hid_, self.d_hid_, bias=False)
-        self.linear_gate = torch_nn.Linear(self.d_hid_, self.d_hid_, bias=True)
-        self.biGRU_mask = torch_nn.GRU(
-            d_hid,
-            d_hid // 2,
-            num_layers=n_layers_gru,
-            batch_first=True,
-            bidirectional=True,
+        self.trans_enc = CustomTransEnc(
+            enc_layer=CustomTransEncLayer(d_model=d_hid, nhead=n_heads_trans),
+            num_layers=n_layers_trans,
+            d_hid=d_hid,
         )
-        self.lin_mask = torch_nn.Linear(d_hid, self.d_hid_)
 
-    def forward(self):
-        return
+        self.ff1 = torch_nn.Sequential(torch_nn.Linear(d_hid, d_hid), torch_nn.Tanh())
+        self.lin1 = torch_nn.Linear(d_hid, len_ques)
+        self.lin2 = torch_nn.Linear(d_hid, d_hid)
+        self.lin3 = torch_nn.Linear(d_hid, d_hid)
 
-    def update_mem(self, nth_para: int, ques_para: Tensor, output: Tensor):
-        """Update memory
+    def forward(self, ques: torch.Tensor, context: torch.Tensor):
+        # ques  : [b, len_ques, d_hid]
+        # contex: [b, n_paras, len_para, d_hid]
+        b, len_ques, _ = ques.size()
 
-        Args:
-            nth_para (int): no. dim to be updated in list 'memory'
-            ques_para (Tensor): combination of quesiton and para
-            output (Tensor): output of TransEnc
-        """
-        # ques_para : [b, seq_len_para, d_hid * 2]
-        # output    : [b, seq_len_para, d_hid * 2]
+        ###################################
+        # Retrieve rectifier from memory
+        ###################################
 
-        ques_para = torch.sum(ques_para, dim=0)
-        # [seq_len_para, d_hid * 2]
-        output = torch.sum(output, dim=0)
-        # [seq_len_para, d_hid * 2]
+        context = context.view(b, -1, self.d_hid).mean(dim=1, keepdim=True)
+        # [b, 1, d_hid]
 
-        gate = self.linear1(ques_para) + self.linear2(output)
-        gate = torch.sigmoid(self.linear_gate(gate))
+        if self.memory.sum() != 0:
+            rectifier = []
+            for i in range(b):
+                rectifier.append(
+                    self.trans_enc(
+                        query=context[i].unsqueeze(0),
+                        key_value=self.memory.unsqueeze(0),
+                    )
+                )
+            rectifier = torch.vstack(rectifier)
+            # [b, 1, d_hid]
+        else:
+            rectifier = context
+            # [b, 1, d_hid]
+        rectifier = self.lin1(self.ff1(rectifier))
+        # [b, 1, len_ques]
+        rectifier = torch.softmax(rectifier.transpose(1, 2), dim=1)
+        # [b, len_ques, 1]
 
-        tmp = gate * ques_para + (1 - gate) * self.memory[nth_para]
-        self.memory[nth_para] = tmp.detach()
+        rectified_ques = rectifier * ques
+        # [b, len_ques, d_hid]
 
-    def get_final_memory(self, ques, context, context_mask):
-        # ques      : [b, seq_len_ques, d_hid]
-        # context   : [b, n_paras, seq_len_para, d_hid]
-        # context_mask: [b, n_paras, seq_len_para]
+        ###################################
+        # Update memory
+        ###################################
 
-        b, n_paras, seq_len_para, _ = context.shape
+        context = self.lin2(context.repeat(1, len_ques, 1))
+        # [b, len_ques, d_hid]
+        ques = self.lin3(ques)
+        # [b, len_ques, d_hid]
 
-        #########################
-        # Calculate CoAttention matrix w.r.t. ques and context
-        # to infer attentive mask
-        #########################
-        context_ = context.reshape(-1, seq_len_para, self.d_hid_ // 2)
-        # [b*n_paras, seq_len_para, d_hid]
-        # paras_len = torch.sum(context_mask, dim=2).reshape(-1).to("cpu")
-        # context_    : [b*n_paras, seq_len_para, d_hid * 2]
-        # context_mask: [b*n_paras]
+        gate = torch.sigmoid(context + ques)
+        # [b, len_ques, d_hid]
 
-        # for i in range(paras_len.shape[0]):
-        #     if paras_len[i] == 0:
-        #         paras_len[i] = 1
+        new_mem = gate * self.memory + (1 - gate) * rectified_ques
 
-        # tmp     = torch_nn.utils.rnn.pack_padded_sequence(context_, paras_len, batch_first=True,
-        #                                                   enforce_sorted=False)
-        # tmp     = self.biGRU_mask(tmp)[0]
-        # context_  = torch_nn.utils.rnn.pad_packed_sequence(tmp, batch_first=True)[0]
-        context_ = self.biGRU_mask(context_)[0]
-        # [b*n_paras, seq_len_para, d_hid]
+        self.memory = Parameter(new_mem.detach(), requires_grad=True)
 
-        paras_first = context_[:, 0, :].reshape(b, n_paras, -1)
-        # [b, n_paras, d_hid]
+        return rectified_ques
 
-        ## Calculate Affinity matrix
-        A = torch.bmm(ques, paras_first.transpose(1, 2)).softmax(dim=1)
-        # [b, seq_len_ques, n_paras]
 
-        #########################
-        # Infer attentive mask from Affinity matrix
-        #########################
-        attentive_mask = torch.bmm(A.transpose(1, 2), ques)
-        # [b, n_paras, d_hid]
+class MemoryBasedContextRectifier(torch_nn.Module):
+    def __init__(
+        self,
+        len_para: int = 170,
+        n_paras: int = 5,
+        d_hid: int = 64,
+        n_heads_trans: int = 8,
+        n_layers_trans: int = 8,
+        device: Any = None,
+    ):
+        super().__init__()
 
-        ## Apply some transformations to mask
-        attentive_mask = attentive_mask.sum(dim=0)
-        # [n_paras, d_hid]
-        attentive_mask = self.lin_mask(attentive_mask).softmax(0)
-        # [n_paras, d_hid * 2]
+        self.d_hid = d_hid
+        self.len_context = n_paras * len_para
 
-        attentive_mask = attentive_mask.unsqueeze(1).repeat(1, seq_len_para, 1)
-        # [n_paras, seq_len_para, d_hid * 2]
+        self.memory = Parameter(
+            torch.zeros((self.len_context, d_hid), device=device),
+            requires_grad=True,
+        )
 
-        #########################
-        # Apply attentive mask
-        #########################
-        final_memory = (self.memory * attentive_mask).sum(dim=0)
-        # [seq_len_para, d_hid * 2]
+        self.trans_enc = CustomTransEnc(
+            enc_layer=CustomTransEncLayer(d_model=d_hid, nhead=n_heads_trans),
+            num_layers=n_layers_trans,
+            d_hid=d_hid,
+        )
 
-        return final_memory
+        self.ff1 = torch_nn.Sequential(torch_nn.Linear(d_hid, d_hid), torch_nn.Tanh())
+        self.lin1 = torch_nn.Linear(d_hid, self.len_context)
+        self.lin2 = torch_nn.Linear(d_hid, d_hid)
+        self.lin3 = torch_nn.Linear(d_hid, d_hid)
 
-    def get_mem_cell(self, nth_para):
-        return self.memory[nth_para]
+    def forward(self, ques: torch.Tensor, context: torch.Tensor):
+        # ques  : [b, len_ques, d_hid]
+        # contex: [b, n_paras, len_para, d_hid]
+
+        b, n_paras, _, _ = context.size()
+
+        ###################################
+        # Retrieve rectifier from memory
+        ###################################
+        context = context.view(b, -1, self.d_hid)
+        # [b, len_context, d_hid]
+
+        ques = ques.mean(dim=1, keepdim=True)
+        # [b, 1, d_hid]
+
+        if self.memory.sum() != 0:
+            rectifier = []
+            for i in range(b):
+                rectifier.append(
+                    self.trans_enc(
+                        query=ques[i].unsqueeze(0), key_value=self.memory.unsqueeze(0)
+                    )
+                )
+            rectifier = torch.vstack(rectifier)
+            # [b, 1, d_hid]
+        else:
+            rectifier = ques
+            # [b, 1, d_hid]
+        rectifier = self.lin1(self.ff1(rectifier))
+        # [b, 1, len_context]
+        rectifier = torch.softmax(rectifier.transpose(1, 2), dim=1)
+        # [b, len_context, 1]
+
+        ## Rectify context
+        rectified_context = rectifier * context
+        # [b, len_context, d_hid]
+
+        ###################################
+        # Update memory
+        ###################################
+
+        ques = self.lin2(ques.repeat(1, self.len_context, 1))
+        # [b, len_context, d_hid]
+        context = self.lin3(context)
+        # [b, len_context, d_hid]
+
+        gate = torch.sigmoid(context + ques)
+        # [b, len_context, d_hid]
+
+        new_mem = gate * self.memory + (1 - gate) * rectified_context
+
+        self.memory = Parameter(new_mem.detach(), requires_grad=True)
+
+        return rectified_context.view(b, n_paras, -1, self.d_hid), rectifier.view(
+            b, n_paras, -1
+        )
