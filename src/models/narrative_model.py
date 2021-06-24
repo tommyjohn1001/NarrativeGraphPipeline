@@ -88,9 +88,11 @@ class NarrativeModel(plt.LightningModule):
             n_edges,
         )
         self.ans_infer = BertDecoder(
-            seq_len_ans,
-            d_bert,
-            d_vocab,
+            seq_len_ans=seq_len_ans,
+            d_bert=d_bert,
+            d_vocab=d_vocab,
+            cls_tok_id=self.bert_tokenizer.cls_token_id,
+            embd_layer=self.embd_layer,
         )
 
         ## Freeeze some parameters
@@ -107,6 +109,9 @@ class NarrativeModel(plt.LightningModule):
         #############################
         self.criterion = torch_nn.CrossEntropyLoss(
             ignore_index=self.bert_tokenizer.pad_token_id
+        )
+        self.teacher_forcing_ratio = torch.nn.parameter.Parameter(
+            torch.tensor(1, dtype=torch.float16)
         )
 
     ####################################################################
@@ -169,12 +174,13 @@ class NarrativeModel(plt.LightningModule):
         ans_mask,
         context_ids,
         context_mask,
+        is_valid=False,
     ):
         # ques       : [b, seq_len_ques]
         # ques_mask  : [b, seq_len_ques]
         # context_ids  : [b, n_paras, seq_len_para]
         # context_mask : [b, n_paras, seq_len_para]
-        # ans        : [b, seq_len_ans]
+        # ans_ids        : [b, seq_len_ans]
         # ans_mask   : [b, seq_len_ans]
 
         ####################
@@ -186,7 +192,6 @@ class NarrativeModel(plt.LightningModule):
             ques_mask=ques_mask,
             context_mask=context_mask,
         )
-        ans = self.embd_layer.encode_ans(ans_ids=ans_ids, ans_mask=ans_mask)
         # ques : [b, seq_len_ques, d_bert]
         # context: [b, n_paras, d_bert]
         # ans  : [b, seq_len_ans, d_bert]
@@ -200,8 +205,16 @@ class NarrativeModel(plt.LightningModule):
         ####################
         # Generate answer
         ####################
-
-        pred = self.ans_infer(Y, ans, ans_mask)
+        if not is_valid:
+            teacher_forcing_ratio = self.teacher_forcing_ratio.item()
+        else:
+            teacher_forcing_ratio = 0
+        pred = self.ans_infer.do_train(
+            Y=Y,
+            ans_ids=ans_ids,
+            ans_mask=ans_mask,
+            teacher_forcing_ratio=teacher_forcing_ratio,
+        )
         # [b, seq_len_ans, d_vocab]
 
         return pred
@@ -218,11 +231,18 @@ class NarrativeModel(plt.LightningModule):
         pred = self.model(
             ques_ids, ques_mask, ans1_ids, ans1_mask, context_ids, context_mask
         )
-        # [b, d_vocab, seq_len_ans]
+        # [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+        self.log(
+            "train/teacher_forcing",
+            self.teacher_forcing_ratio,
+            on_step=True,
+            on_epoch=False,
+            prog_bar=False,
+        )
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
 
@@ -256,8 +276,9 @@ class NarrativeModel(plt.LightningModule):
         pred = self.model(
             ques_ids, ques_mask, ans1_ids, ans1_mask, context_ids, context_mask
         )
+        # [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -273,11 +294,17 @@ class NarrativeModel(plt.LightningModule):
         context_mask = batch["context_mask"]
 
         pred = self.model(
-            ques_ids, ques_mask, ans1_ids, ans1_mask, context_ids, context_mask
+            ques_ids,
+            ques_mask,
+            ans1_ids,
+            ans1_mask,
+            context_ids,
+            context_mask,
+            is_valid=True,
         )
-        # [b, d_vocab, seq_len_ans]
+        # [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -330,6 +357,11 @@ class NarrativeModel(plt.LightningModule):
     def on_train_epoch_end(self) -> None:
         if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
             self.datamodule.switch_answerability()
+
+            if self.current_epoch >= 8:
+                self.teacher_forcing_ratio = torch_nn.parameter.Parameter(
+                    max(self.teacher_forcing_ratio - 0.3, 0)
+                )
 
     #########################################
     # FOR PREDICTION PURPOSE
