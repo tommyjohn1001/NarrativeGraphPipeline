@@ -24,7 +24,6 @@ class Decoder(torch_nn.Module):
         self.cls_tok_id = cls_tok_id
         self.d_vocab = d_vocab
 
-        self.d_hid_ = d_hid * 4
         self.embd_layer: BertBasedEmbedding = embd_layer
         bert_conf = BertConfig()
         bert_conf.is_decoder = True
@@ -35,6 +34,32 @@ class Decoder(torch_nn.Module):
         self.trans_decoder = BertModel(config=bert_conf)
 
         self.lin1 = torch_nn.Linear(d_hid, d_vocab)
+
+    def forward(
+        self,
+        Y: torch.Tensor,
+        ans_ids: torch.Tensor,
+        ans_mask: torch.Tensor,
+    ):
+        # Y         : [b, len_para, d_hid]
+        # ans_ids   : [b, len_]
+        # ans_mask  : [b, len_]
+
+        ## Embed answer
+        input_embds = self.embd_layer.encode_ans(ans_ids, ans_mask)
+        # [b, len_, d_hid]
+
+        output = self.trans_decoder(
+            inputs_embeds=input_embds,
+            attention_mask=ans_mask,
+            encoder_hidden_states=Y,
+        )[0]
+        # [b, len_, d_hid]
+
+        output = self.lin1(output)
+        # [b, len_, d_vocab]
+
+        return output
 
     def do_train(
         self,
@@ -47,43 +72,28 @@ class Decoder(torch_nn.Module):
         # ans_ids   : [b, len_ans]
         # ans_mask  : [b, len_ans]
 
-        final_dists = []
         input_ids = torch.full((Y.size()[0], 1), self.cls_tok_id, device=Y.device)
         # [b, 1]
 
         for ith in range(1, self.len_ans + 1):
-            ## Embed answer
-            ans = self.embd_layer.encode_ans(input_ids, ans_mask[:, :ith])
-            # [b, ith, d_hid]
-
-            ## Decode answer
-            decoder_output = self.trans_decoder(
-                inputs_embeds=ans,
-                attention_mask=ans_mask[:, :ith],
-                encoder_hidden_states=Y,
-            )[0][:, -1, :]
-            # [b, d_hid]
-
-            final = self.lin1(decoder_output)
-            # [b, d_vocab]
-
-            final_dists.append(final.unsqueeze(-1))
+            output = self(Y=Y, ans_ids=input_ids, ans_mask=ans_mask[:, :ith])
+            # [b, ith, d_vocab]
 
             ## Apply Scheduling teacher
             if ith == self.len_ans:
                 break
 
-            final = torch.argmax(final, dim=-1)
+            _, topi = torch.topk(output[:, -1, :], k=1)
             chosen = self.choose_teacher_forcing(
                 teacher_forcing_ratio=teacher_forcing_ratio,
-                output=final,
+                output=topi,
                 ans_ids=ans_ids,
                 ith=ith,
             )
             # [b]
-            input_ids = torch.cat((input_ids, chosen.detach().unsqueeze(1)), dim=1)
+            input_ids = torch.cat((input_ids, chosen.detach()), dim=1)
 
-        return torch.cat(final_dists, dim=-1)
+        return output
 
     def choose_teacher_forcing(
         self,
@@ -92,11 +102,11 @@ class Decoder(torch_nn.Module):
         ans_ids: torch.Tensor,
         ith: int,
     ):
-        # output: [b]
+        # output: [b, 1]
         # ans_ids   : [b, len_ans]
         use_teacher_forcing = random.random() < teacher_forcing_ratio
 
-        return output if use_teacher_forcing else ans_ids[:, ith]
+        return ans_ids[:, ith].unsqueeze(1) if use_teacher_forcing else output
 
     def do_predict(
         self,

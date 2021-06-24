@@ -247,7 +247,12 @@ class MemoryBasedQuesRectifier(torch_nn.Module):
         gate = torch.sigmoid(context + ques)
         # [b, len_ques, d_hid]
 
-        new_mem = gate * self.memory + (1 - gate) * rectified_ques
+        new_mem = self.memory
+        for i in range(b):
+            if new_mem.sum() != 0:
+                new_mem = gate[i] * new_mem + (1 - gate[i]) * rectified_ques[i]
+            else:
+                new_mem = rectified_ques[i]
 
         self.memory = Parameter(new_mem.detach(), requires_grad=True)
 
@@ -334,7 +339,12 @@ class MemoryBasedContextRectifier(torch_nn.Module):
         gate = torch.sigmoid(context + ques)
         # [b, len_context, d_hid]
 
-        new_mem = gate * self.memory + (1 - gate) * rectified_context
+        new_mem = self.memory
+        for i in range(b):
+            if new_mem.sum() != 0:
+                new_mem = gate[i] * new_mem + (1 - gate[i]) * rectified_context[i]
+            else:
+                new_mem = rectified_context[i]
 
         self.memory = Parameter(new_mem.detach(), requires_grad=True)
 

@@ -16,10 +16,10 @@ class NarrativeDataModule(plt.LightningDataModule):
         path_bert: str,
         sizes_dataset: dict,
         batch_size: int = 5,
-        seq_len_ques: int = 42,
+        len_ques: int = 42,
         len_para_processing: int = 120,
-        seq_len_para: int = 170,
-        seq_len_ans: int = 42,
+        len_para: int = 170,
+        len_ans: int = 42,
         n_paras: int = 5,
         num_workers: int = 4,
     ):
@@ -27,10 +27,10 @@ class NarrativeDataModule(plt.LightningDataModule):
         super().__init__()
 
         self.batch_size = batch_size
-        self.seq_len_ques = seq_len_ques
+        self.len_ques = len_ques
         self.len_para_processing = len_para_processing
-        self.seq_len_para = seq_len_para
-        self.seq_len_ans = seq_len_ans
+        self.len_para = len_para
+        self.len_ans = len_ans
         self.n_paras = n_paras
         self.path_raw_data = path_raw_data
         self.path_processed_contx = path_processed_contx
@@ -63,9 +63,9 @@ class NarrativeDataModule(plt.LightningDataModule):
         dataset_args = {
             "path_data": self.path_data,
             "path_bert": self.path_bert,
-            "seq_len_ques": self.seq_len_ques,
-            "seq_len_para": self.seq_len_para,
-            "seq_len_ans": self.seq_len_ans,
+            "len_ques": self.len_ques,
+            "len_para": self.len_para,
+            "len_ans": self.len_ans,
             "n_paras": self.n_paras,
             "num_worker": self.num_workers,
         }

@@ -182,14 +182,14 @@ class NarrativeModel(plt.LightningModule):
             ques_mask=ques_mask,
             context_mask=context_mask,
         )
-        # ques : [b, len_ques, d_bert]
-        # context: [b, n_paras, len_para, d_bert]
+        # ques : [b, len_ques, d_hid]
+        # context: [b, n_paras, len_para, d_hid]
 
         ####################
         # Do reasoning
         ####################
-        Y = self.reasoning(ques=ques, context=context, context_mask=context_mask)
-        # [b, len_ans, d_hid * 4]
+        Y = self.reasoning(ques=ques, context=context)
+        # [b, len_ans, d_hid]
 
         ####################
         # Generate answer
@@ -202,7 +202,6 @@ class NarrativeModel(plt.LightningModule):
             Y=Y,
             ans_ids=ans_ids,
             ans_mask=ans_mask,
-            context_ids=context_ids,
             teacher_forcing_ratio=teacher_forcing_ratio,
         )
         # pred: [b, len_ans, d_vocab_ex]
@@ -226,9 +225,9 @@ class NarrativeModel(plt.LightningModule):
             context_ids=context_ids,
             context_mask=context_mask,
         )
-        # [b, d_vocab, len_ans]
+        # pred: [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
+        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
         self.log(
@@ -285,9 +284,10 @@ class NarrativeModel(plt.LightningModule):
             context_ids=context_ids,
             context_mask=context_mask,
         )
-        # [b, d_vocab, len_ans]
+        # pred: [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
+        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
+
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return loss
@@ -310,9 +310,9 @@ class NarrativeModel(plt.LightningModule):
             context_mask=context_mask,
             is_valid=True,
         )
-        # pred: [b, d_vocab, len_ans]
+        # pred: [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
+        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
