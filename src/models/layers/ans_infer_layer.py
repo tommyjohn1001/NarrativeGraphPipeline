@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any
 
 
 from transformers import BertConfig, BertModel
@@ -20,7 +20,6 @@ class Decoder(torch_nn.Module):
         cls_tok_id: int = 101,
         pad_tok_id: int = 0,
         embd_layer: torch.nn.Module = None,
-        max_step: int = 0,
     ):
         super().__init__()
 
@@ -31,7 +30,9 @@ class Decoder(torch_nn.Module):
         self.d_vocab = d_vocab
         self.epsilon = 1
         self.bigEPSILON = 0.5
-        self.max_step = max_step
+
+        self.t = 0
+        self.r = 0
 
         self.embd_layer: BertBasedEmbedding = embd_layer
         bert_conf = BertConfig()
@@ -54,7 +55,6 @@ class Decoder(torch_nn.Module):
         # input_embds: [b, len_, d_vocab]
         # input_masks: [b, len_]
 
-        input_embds = self.embd_layer.encode_ans(input_embds)
         # [b, d_hid]
 
         output = self.trans_decoder(
@@ -75,6 +75,7 @@ class Decoder(torch_nn.Module):
         ans_ids: torch.Tensor,
         ans_mask: torch.Tensor,
         cur_step: int,
+        max_step: int,
         cur_epoch: int,
     ):
         # Y         : [b, len_para, d_hid]
@@ -84,12 +85,14 @@ class Decoder(torch_nn.Module):
         b = Y.size(0)
 
         input_emds = []
+        final = []
 
         ## Init input_embs with cls_embd
-        cls_embd = self.get_embd_tensor(b=b, device=Y.device, ids=self.cls_tok_id)
-        # [b, d_vocab]
-
-        input_emds.append(cls_embd.unsqueeze(1))
+        cls_ids = torch.full((b, 1), fill_value=self.cls_tok_id, device=Y.device)
+        # [b, 1]
+        cls_embd = self.embd_layer.encode_ans(cls_ids)
+        # [b, 1, d_hid]
+        input_emds.append(cls_embd)
 
         for ith in range(1, self.len_ans + 1):
             output = self(
@@ -98,31 +101,37 @@ class Decoder(torch_nn.Module):
                 input_masks=ans_mask[:, :ith],
             )
             # [b, ith, d_vocab]
+            final.append(output[:, -1].unsqueeze(1))
+
+            if ith == self.len_ans:
+                break
 
             ## Apply Scheduling teacher
             output_tok_emb = self.choose_scheduled_sampling(
                 output=output,
                 ans_ids=ans_ids,
                 cur_step=cur_step,
+                max_step=max_step,
                 cur_epoch=cur_epoch,
             )
-            # [b, d_vocab]
-            input_emds.append(output_tok_emb.unsqueeze(1))
+            # [b, 1, d_hid]
+            input_emds.append(output_tok_emb)
 
-        return torch.cat(input_emds, dim=1)[:, :-1].transpose(1, 2)
+        return torch.cat(final, dim=1).transpose(1, 2)
 
     ##############################################
     # Methods for scheduled sampling
     ##############################################
     def get_embd_tensor(self, b: int, device: Any, ids: Any):
-        embd = torch.zeros((b, self.d_vocab), device=device)
+        embd = torch.zeros((b, self.d_vocab), device=device, requires_grad=False)
         # [b, d_vocab]
 
         if not torch.is_tensor(ids):
             assert isinstance(ids, int)
-            ids = torch.full((b, 1), fill_value=ids, device=device)
+            ids = torch.full((b, 1), fill_value=ids, device=device, requires_grad=False)
         ones = torch.ones((b, 1), device=device)
         embd = torch.scatter_add(embd, dim=1, index=ids, src=ones)
+        embd.requires_grad_()
         # [b, d_vocab]
 
         return embd
@@ -132,6 +141,7 @@ class Decoder(torch_nn.Module):
         output: torch.Tensor,
         ans_ids: torch.Tensor,
         cur_step: int,
+        max_step: int,
         cur_epoch: int,
     ):
         # output: [b, len_, d_vocab]
@@ -143,37 +153,36 @@ class Decoder(torch_nn.Module):
         output = output[:, -1, :]
         # [b, d_vocab]
 
-        ## Create tensor full of PAD indices if ith == len_ans - 1
-        pad_embd = None
-        if ith == self.len_ans:
-            pad_embd = self.get_embd_tensor(
-                b=b, device=output.device, ids=self.pad_tok_id
-            )
-            # [b, d_vocab]
-
         ## If not exceed 15 epochs, keep using Teacher Forcing
         if cur_epoch < 15:
             if ith < self.len_ans:
-                return self.get_embd_tensor(
-                    b, output.device, ans_ids[:, ith].unsqueeze(1)
-                )
+                return self.embd_layer.encode_ans(ans_ids[:, ith].unsqueeze(1))
+
+            pad_ids = torch.full(
+                (b, 1), fill_value=self.pad_tok_id, device=output.device
+            )
+            # [b, 1]
+            pad_embd = self.embd_layer.encode_ans(pad_ids)
+            # [b, 1, d_hid]
             return pad_embd
-            # [b, d_vocab]
+            # [b, 1, d_hid]
 
         # Apply Scheduled Sampling
-        t = np.random.binomial(1, cur_step / self.max_step)
+        t = np.random.binomial(1, cur_step / max_step)
+        self.t = t
         if t == 0:
             if ith < self.len_ans:
                 return self.get_embd_tensor(
                     b, output.device, ans_ids[:, ith].unsqueeze(1)
                 )
-            return pad_embd
-            # [b, d_vocab]
+            return self.get_embd_tensor(b=b, device=output.device, ids=self.pad_tok_id)
+        # [b, d_vocab]
 
         #################
         ## Calculate eta
         #################
-        r = np.random.binomial(1, max((cur_step / self.max_step, self.bigEPSILON)))
+        r = np.random.binomial(1, max((cur_step / max_step, self.bigEPSILON)))
+        self.r = r
         epsilon = torch.exp(torch.tensor(-self.epsilon))
         if r == 0:
             if ith < self.len_ans:
@@ -206,25 +215,39 @@ class Decoder(torch_nn.Module):
         # [b, d_vocab]
         output = output / torch.sum(output, dim=1).unsqueeze(1).repeat(1, self.d_vocab)
         # [b, d_vocab]
+        output = self.embd_layer.w_sum_ans(output).unsqueeze(1)
+        # [b, 1, d_hid]
 
         return output
 
+    ##############################################
+    # Methods for validation/prediction
+    ##############################################
     def do_predict(
         self,
-        decoder_input_ids: List,
         Y: torch.Tensor,
-        context_ids: torch.Tensor,
+        ans_ids: torch.Tensor,
+        ans_mask: torch.Tensor,
     ):
-        ## TODO: Finish implementation later
 
         # decoder_input_ids: list of indices
         # Y  : [n_paras, len_para, d_hid * 4]
 
-        decoder_input_ids = (
-            torch.LongTensor(decoder_input_ids).type_as(Y).long().unsqueeze(0)
-        )
+        input_ids = torch.full((Y.size()[0], 1), self.cls_tok_id, device=Y.device)
+        # [b, 1]
 
-        decoder_input_mask = torch.ones(decoder_input_ids.shape, device=self.device)
-        decoder_input_embd = self.embd_layer.encode_ans(
-            decoder_input_ids, decoder_input_mask
-        )
+        for ith in range(1, self.len_ans + 1):
+            input_embds = self.embd_layer.encode_ans(input_ids)
+            # [b, len_, d_hid]
+
+            output = self(Y=Y, input_embds=input_embds, input_masks=ans_mask[:, :ith])
+            # [b, ith, d_vocab]
+
+            if ith == self.len_ans:
+                break
+
+            input_ids = torch.cat(
+                (input_ids, ans_ids[:, ith].unsqueeze(1).detach()), dim=1
+            )
+
+        return output.transpose(1, 2)

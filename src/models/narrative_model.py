@@ -78,8 +78,6 @@ class NarrativeModel(plt.LightningModule):
             d_hid=d_hid,
             cls_tok_id=self.bert_tokenizer.cls_token_id,
             embd_layer=self.embd_layer,
-            max_step=self.datamodule.data_train.size_dataset()
-            // self.datamodule.batch_size,
         )
 
         ## Freeeze some parameters
@@ -94,7 +92,9 @@ class NarrativeModel(plt.LightningModule):
         #############################
         # Define things
         #############################
-        self.criterion = torch_nn.NLLLoss(ignore_index=self.bert_tokenizer.pad_token_id)
+        self.criterion = torch_nn.CrossEntropyLoss(
+            ignore_index=self.bert_tokenizer.pad_token_id
+        )
 
     ####################################################################
     # FOR TRAINING PURPOSE
@@ -160,8 +160,10 @@ class NarrativeModel(plt.LightningModule):
         ans_mask,
         context_ids,
         context_mask,
-        cur_step: int,
-        cur_epoch: int,
+        cur_step: int = 0,
+        max_step: int = 0,
+        cur_epoch: int = 0,
+        is_valid: bool = False,
     ):
         # ques_ids: [b, len_ques]
         # ques_mask: [b, len_ques]
@@ -191,15 +193,22 @@ class NarrativeModel(plt.LightningModule):
         ####################
         # Generate answer
         ####################
-
-        pred = self.ans_infer.do_train(
-            Y=Y,
-            ans_ids=ans_ids,
-            ans_mask=ans_mask,
-            cur_step=cur_step,
-            cur_epoch=cur_epoch,
-        )
-        # pred: [b, len_ans, d_vocab_ex]
+        if is_valid:
+            pred = self.ans_infer.do_predict(
+                Y=Y,
+                ans_ids=ans_ids,
+                ans_mask=ans_mask,
+            )
+        else:
+            pred = self.ans_infer.do_train(
+                Y=Y,
+                ans_ids=ans_ids,
+                ans_mask=ans_mask,
+                cur_step=cur_step,
+                max_step=max_step,
+                cur_epoch=cur_epoch,
+            )
+        # pred: [b, len_ans, d_vocab]
 
         return pred
 
@@ -220,13 +229,13 @@ class NarrativeModel(plt.LightningModule):
             context_ids=context_ids,
             context_mask=context_mask,
             cur_step=batch_idx,
+            max_step=self.datamodule.data_train.size_dataset
+            // self.datamodule.batch_size,
             cur_epoch=self.current_epoch,
         )
         # pred: [b, d_vocab, len_ans]
 
         loss = self.criterion(pred, ans1_ids)
-
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
 
@@ -241,6 +250,14 @@ class NarrativeModel(plt.LightningModule):
             for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
         ]
 
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+        self.log(
+            "train/t", self.ans_infer.t, on_step=True, on_epoch=True, prog_bar=False
+        )
+        self.log(
+            "train/r", self.ans_infer.r, on_step=True, on_epoch=True, prog_bar=False
+        )
+
         return {"loss": loss, "pred": prediction}
 
     def on_train_batch_end(
@@ -252,8 +269,6 @@ class NarrativeModel(plt.LightningModule):
     def on_train_epoch_end(self) -> None:
         if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
             self.datamodule.switch_answerability()
-
-        self.ans_infer.config_samplig_ratio(cur_epoch=self.current_epoch)
 
     def test_step(self, batch: Any, batch_idx: int):
         ques_ids = batch["ques_ids"]
@@ -298,10 +313,8 @@ class NarrativeModel(plt.LightningModule):
             ans_mask=ans1_mask,
             context_ids=context_ids,
             context_mask=context_mask,
-            cur_step=batch_idx,
-            cur_epoch=self.current_epoch,
+            is_valid=True,
         )
-        # pred: [b, d_vocab, len_ans]
         # pred: [b, d_vocab, len_ans]
 
         loss = self.criterion(pred, ans1_ids)
