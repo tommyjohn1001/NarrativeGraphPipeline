@@ -4,6 +4,7 @@ from typing import List
 from transformers import BertConfig, BertModel
 import torch.nn as torch_nn
 import torch
+import numpy as np
 
 from src.models.layers.bertbasedembd_layer import BertBasedEmbedding
 
@@ -23,6 +24,7 @@ class Decoder(torch_nn.Module):
         self.d_hid = d_hid
         self.cls_tok_id = cls_tok_id
         self.d_vocab = d_vocab
+        self.t = -1
 
         self.embd_layer: BertBasedEmbedding = embd_layer
         bert_conf = BertConfig()
@@ -66,7 +68,10 @@ class Decoder(torch_nn.Module):
         Y: torch.Tensor,
         ans_ids: torch.Tensor,
         ans_mask: torch.Tensor,
-        teacher_forcing_ratio: float,
+        cur_step: int,
+        max_step: int,
+        cur_epoch: int,
+        is_valid: bool,
     ):
         # Y         : [b, len_para, d_hid]
         # ans_ids   : [b, len_ans]
@@ -84,29 +89,47 @@ class Decoder(torch_nn.Module):
                 break
 
             _, topi = torch.topk(output[:, -1, :], k=1)
-            chosen = self.choose_teacher_forcing(
-                teacher_forcing_ratio=teacher_forcing_ratio,
-                output=topi,
-                ans_ids=ans_ids,
-                ith=ith,
-            )
+            if is_valid:
+                chosen = topi
+            else:
+                chosen = self.choose_scheduled_sampling(
+                    output=topi,
+                    ans_ids=ans_ids,
+                    ith=ith,
+                    cur_step=cur_step,
+                    max_step=max_step,
+                    cur_epoch=cur_epoch,
+                )
             # [b]
             input_ids = torch.cat((input_ids, chosen.detach()), dim=1)
 
-        return output
+        return output.transpose(1, 2)
 
-    def choose_teacher_forcing(
+    def choose_scheduled_sampling(
         self,
-        teacher_forcing_ratio: float,
         output: torch.Tensor,
         ans_ids: torch.Tensor,
         ith: int,
+        cur_step: int,
+        max_step: int,
+        cur_epoch: int,
     ):
+
         # output: [b, 1]
         # ans_ids   : [b, len_ans]
-        use_teacher_forcing = random.random() < teacher_forcing_ratio
+        if cur_epoch < 15:
+            t = 0
 
-        return ans_ids[:, ith].unsqueeze(1) if use_teacher_forcing else output
+        if cur_epoch < 20:
+            t = np.random.binomial(1, min((cur_step / max_step, 0.5)))
+        elif cur_epoch < 25:
+            t = np.random.binomial(1, min((cur_step / max_step, 0.75)))
+        else:
+            t = np.random.binomial(1, cur_step / max_step)
+
+        self.t = t
+
+        return ans_ids[:, ith].unsqueeze(1) if t == 0 else output
 
     def do_predict(
         self,

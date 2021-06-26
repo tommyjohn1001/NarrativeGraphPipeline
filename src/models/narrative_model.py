@@ -164,7 +164,10 @@ class NarrativeModel(plt.LightningModule):
         ans_mask,
         context_ids,
         context_mask,
-        is_valid=False,
+        cur_step: int = 0,
+        max_step: int = 0,
+        cur_epoch: int = 0,
+        is_valid: bool = False,
     ):
         # ques_ids: [b, len_ques]
         # ques_mask: [b, len_ques]
@@ -194,15 +197,14 @@ class NarrativeModel(plt.LightningModule):
         ####################
         # Generate answer
         ####################
-        if not is_valid:
-            teacher_forcing_ratio = self.teacher_forcing_ratio.item()
-        else:
-            teacher_forcing_ratio = 0
         pred = self.ans_infer.do_train(
             Y=Y,
             ans_ids=ans_ids,
             ans_mask=ans_mask,
-            teacher_forcing_ratio=teacher_forcing_ratio,
+            cur_step=cur_step,
+            max_step=max_step,
+            cur_epoch=cur_epoch,
+            is_valid=is_valid,
         )
         # pred: [b, len_ans, d_vocab_ex]
 
@@ -224,19 +226,14 @@ class NarrativeModel(plt.LightningModule):
             ans_mask=ans1_mask,
             context_ids=context_ids,
             context_mask=context_mask,
+            cur_step=batch_idx,
+            max_step=self.datamodule.data_train.size_dataset
+            // self.datamodule.batch_size,
+            cur_epoch=self.current_epoch,
         )
         # pred: [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
-
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
-        self.log(
-            "train/teacher_forcing",
-            self.teacher_forcing_ratio,
-            on_step=True,
-            on_epoch=False,
-            prog_bar=False,
-        )
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
 
@@ -251,6 +248,15 @@ class NarrativeModel(plt.LightningModule):
             for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
         ]
 
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
+        self.log(
+            "train/sampling",
+            self.ans_infer.t,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=False,
+        )
+
         return {"loss": loss, "pred": prediction}
 
     def on_train_batch_end(
@@ -263,9 +269,9 @@ class NarrativeModel(plt.LightningModule):
         if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
             self.datamodule.switch_answerability()
 
-            if self.current_epoch >= 20:
+            if self.current_epoch >= 15:
                 self.teacher_forcing_ratio = torch_nn.parameter.Parameter(
-                    max(self.teacher_forcing_ratio - 0.3, 0)
+                    max(self.teacher_forcing_ratio - 0.3, torch.tensor(0))
                 )
 
     def test_step(self, batch: Any, batch_idx: int):
@@ -286,7 +292,7 @@ class NarrativeModel(plt.LightningModule):
         )
         # pred: [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -312,9 +318,7 @@ class NarrativeModel(plt.LightningModule):
         )
         # pred: [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
-
-        self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
 
@@ -328,6 +332,8 @@ class NarrativeModel(plt.LightningModule):
             }
             for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
         ]
+
+        self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return {"loss": loss, "pred": prediction}
 
