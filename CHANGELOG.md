@@ -2,11 +2,16 @@
 
 ### This file contains changes and modifications during developing.
 
-## June 24 2021, 10:33
-- Fix error in module *Memory*
-- Modify *Scheduled Sampling* in module *ans_infer_layer* and *narrative_model*
-- Modify loss calculating formulation
+## June 26 2021, 8:23
 
+- Apply **M-WEAM**
+- Fix error backward is too slow
+
+## June 24 2021, 10:33
+
+- Fix error in module _Memory_
+- Modify _Scheduled Sampling_ in module _ans_infer_layer_ and _narrative_model_
+- Modify loss calculating formulation
 
 ## June 21 2021, 23:54
 

@@ -54,11 +54,13 @@ class BertBasedEmbedding(torch_nn.Module):
 
         return ques, context
 
-    def encode_ans(self, ans_ids, ans_mask):
-        # ans_ids : [b, len_ans]
-        # ans_mask : [b, len_ans]
+    def encode_ans(self, input_embds):
+        # input_embds : [b, len_, d_bert]
 
-        ans = self.bert_emb(input_ids=ans_ids, attention_mask=ans_mask)[0]
+        input_embds = input_embds @ self.bert_emb.embeddings.word_embeddings.weight
+        # [b, len_, d_bert]
 
-        return self.lin1(ans)
-        # [b, len_ans, d_hid]
+        input_embds = self.lin1(input_embds)
+        # [b, len_, d_hid]
+
+        return input_embds
