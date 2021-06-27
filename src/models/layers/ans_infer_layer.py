@@ -6,6 +6,7 @@ from torch.nn.parameter import Parameter
 import torch.nn as torch_nn
 import torch
 import numpy as np
+from transformers.models.bert.tokenization_bert import BertTokenizer
 
 
 from src.models.layers.bertbasedembd_layer import BertBasedEmbedding
@@ -17,17 +18,16 @@ class Decoder(torch_nn.Module):
         len_ans: int = 15,
         d_vocab: int = 30522,
         d_hid: int = 64,
-        cls_tok_id: int = 101,
-        pad_tok_id: int = 0,
+        tokenizer: BertTokenizer = None,
         embd_layer: torch.nn.Module = None,
     ):
         super().__init__()
 
         self.len_ans = len_ans
         self.d_hid = d_hid
-        self.cls_tok_id = cls_tok_id
-        self.pad_tok_id = pad_tok_id
+        self.tokenizer = tokenizer
         self.d_vocab = d_vocab
+        self.device = None
         self.epsilon = 1
         self.bigEPSILON = 0.5
 
@@ -67,7 +67,35 @@ class Decoder(torch_nn.Module):
         output = self.lin1(output)
         # [b, len_, d_vocab]
 
+        output = torch.softmax(output, dim=-1)
+
         return output
+
+    def get_groundtruth(self, b: int, ids: Any, output=None):
+        # output: [b: d_vocab]
+
+        #########################
+        # Get distribution over vocab by token ids
+        #########################
+        mask = torch.zeros((b, self.d_vocab), device=self.device, requires_grad=False)
+        # [b, d_vocab]
+
+        if not torch.is_tensor(ids):
+            assert isinstance(ids, int)
+            ids = torch.full(
+                (b, 1), fill_value=ids, device=self.device, requires_grad=False
+            )
+        ones = torch.ones((b, 1), device=self.device)
+        mask = torch.scatter_add(mask, dim=1, index=ids, src=ones)
+        # [b, d_vocab]
+
+        #########################
+        # Get word embedding
+        #########################
+        new_word = self.embd_layer.w_sum_ans(mask)
+        # [b, d_hid]
+
+        return output * mask if torch.torch.is_tensor(output) else None, new_word
 
     def do_train(
         self,
@@ -83,16 +111,16 @@ class Decoder(torch_nn.Module):
         # ans_mask  : [b, len_ans]
 
         b = Y.size(0)
+        self.device = Y.device
 
         input_emds = []
         final = []
 
-        ## Init input_embs with cls_embd
-        cls_ids = torch.full((b, 1), fill_value=self.cls_tok_id, device=Y.device)
-        # [b, 1]
-        cls_embd = self.embd_layer.encode_ans(cls_ids)
-        # [b, 1, d_hid]
-        input_emds.append(cls_embd)
+        ## Init input_embs with cls embedding
+        _, cls_embd = self.get_groundtruth(b, self.tokenizer.cls_token_id)
+        # [b, d_hid]
+
+        input_emds.append(cls_embd.unsqueeze(1))
 
         for ith in range(1, self.len_ans + 1):
             output = self(
@@ -101,40 +129,26 @@ class Decoder(torch_nn.Module):
                 input_masks=ans_mask[:, :ith],
             )
             # [b, ith, d_vocab]
-            final.append(output[:, -1].unsqueeze(1))
 
-            if ith == self.len_ans:
-                break
-
-            ## Apply Scheduling teacher
-            output_tok_emb = self.choose_scheduled_sampling(
+            ## Apply WEAM
+            spare_p, new_word = self.choose_scheduled_sampling(
                 output=output,
                 ans_ids=ans_ids,
                 cur_step=cur_step,
                 max_step=max_step,
                 cur_epoch=cur_epoch,
             )
-            # [b, 1, d_hid]
-            input_emds.append(output_tok_emb)
+            # spare_p: [b, d_vocab]
+            # new_word: [b, d_hid]
+
+            final.append(spare_p.unsqueeze(1))
+            input_emds.append(new_word.unsqueeze(1))
 
         return torch.cat(final, dim=1).transpose(1, 2)
 
     ##############################################
     # Methods for scheduled sampling
     ##############################################
-    def get_embd_tensor(self, b: int, device: Any, ids: Any):
-        embd = torch.zeros((b, self.d_vocab), device=device, requires_grad=False)
-        # [b, d_vocab]
-
-        if not torch.is_tensor(ids):
-            assert isinstance(ids, int)
-            ids = torch.full((b, 1), fill_value=ids, device=device, requires_grad=False)
-        ones = torch.ones((b, 1), device=device)
-        embd = torch.scatter_add(embd, dim=1, index=ids, src=ones)
-        embd.requires_grad_()
-        # [b, d_vocab]
-
-        return embd
 
     def choose_scheduled_sampling(
         self,
@@ -153,30 +167,23 @@ class Decoder(torch_nn.Module):
         output = output[:, -1, :]
         # [b, d_vocab]
 
+        ## Create tensor 'pad_embd'
+
         ## If not exceed 15 epochs, keep using Teacher Forcing
         if cur_epoch < 15:
             if ith < self.len_ans:
-                return self.embd_layer.encode_ans(ans_ids[:, ith].unsqueeze(1))
+                return self.get_groundtruth(b, ans_ids[:, ith].unsqueeze(1), output)
 
-            pad_ids = torch.full(
-                (b, 1), fill_value=self.pad_tok_id, device=output.device
-            )
-            # [b, 1]
-            pad_embd = self.embd_layer.encode_ans(pad_ids)
-            # [b, 1, d_hid]
-            return pad_embd
-            # [b, 1, d_hid]
+            return self.get_groundtruth(b, self.tokenizer.pad_token_id, output)
 
         # Apply Scheduled Sampling
         t = np.random.binomial(1, cur_step / max_step)
         self.t = t
         if t == 0:
             if ith < self.len_ans:
-                return self.get_embd_tensor(
-                    b, output.device, ans_ids[:, ith].unsqueeze(1)
-                )
-            return self.get_embd_tensor(b=b, device=output.device, ids=self.pad_tok_id)
-        # [b, d_vocab]
+                return self.get_groundtruth(b, ans_ids[:, ith].unsqueeze(1), output)
+
+            return self.get_groundtruth(b, self.tokenizer.pad_token_id, output)
 
         #################
         ## Calculate eta
@@ -213,12 +220,12 @@ class Decoder(torch_nn.Module):
         #################
         output = output * mask
         # [b, d_vocab]
-        output = output / torch.sum(output, dim=1).unsqueeze(1).repeat(1, self.d_vocab)
+        spare_p = output / torch.sum(output, dim=1).unsqueeze(1).repeat(1, self.d_vocab)
         # [b, d_vocab]
-        output = self.embd_layer.w_sum_ans(output).unsqueeze(1)
-        # [b, 1, d_hid]
+        new_word = self.embd_layer.w_sum_ans(output)
+        # [b, d_hid]
 
-        return output
+        return spare_p, new_word
 
     ##############################################
     # Methods for validation/prediction
@@ -226,28 +233,60 @@ class Decoder(torch_nn.Module):
     def do_predict(
         self,
         Y: torch.Tensor,
-        ans_ids: torch.Tensor,
         ans_mask: torch.Tensor,
     ):
 
-        # decoder_input_ids: list of indices
-        # Y  : [n_paras, len_para, d_hid * 4]
+        b = Y.size(0)
+        self.device = Y.device
 
-        input_ids = torch.full((Y.size()[0], 1), self.cls_tok_id, device=Y.device)
-        # [b, 1]
+        input_emds = []
+        final = []
+
+        ## Init input_embs with cls embedding
+        _, cls_embd = self.get_groundtruth(b, self.tokenizer.cls_token_id)
+        # [b, d_hid]
+
+        input_emds.append(cls_embd.unsqueeze(1))
 
         for ith in range(1, self.len_ans + 1):
-            input_embds = self.embd_layer.encode_ans(input_ids)
-            # [b, len_, d_hid]
-
-            output = self(Y=Y, input_embds=input_embds, input_masks=ans_mask[:, :ith])
+            output = self(
+                Y=Y,
+                input_embds=torch.cat(input_emds, dim=1),
+                input_masks=ans_mask[:, :ith],
+            )
             # [b, ith, d_vocab]
 
-            if ith == self.len_ans:
-                break
+            ## Apply WEAM
+            epsilon = torch.exp(torch.tensor(-self.epsilon))
+            ita = epsilon * torch.max(epsilon * output, dim=-1)[0]
+            # ita: [b]
 
-            input_ids = torch.cat(
-                (input_ids, ans_ids[:, ith].unsqueeze(1).detach()), dim=1
+            #################
+            ## Calculate mask
+            #################
+            mask = torch.where(
+                output > ita.unsqueeze(1).repeat(1, self.d_vocab),
+                torch.ones(output.size()).type_as(output),
+                torch.zeros(output.size()).type_as(output),
             )
+            # [b, d_vocab]
 
-        return output.transpose(1, 2)
+            #################
+            ## Recalculate output
+            #################
+            output = output * mask
+            # [b, d_vocab]
+            spare_p = output / torch.sum(output, dim=1).unsqueeze(1).repeat(
+                1, self.d_vocab
+            )
+            # [b, d_vocab]
+
+            _, topi = torch.topk(spare_p, k=1)
+            # [b, 1]
+            new_word = self.embd_layer.w_sum_ans(self.get_groundtruth(b, topi))
+            # [b, d_hid]
+
+            final.append(spare_p.unsqueeze(1))
+            input_emds.append(new_word.unsqueeze(1))
+
+        return torch.cat(final, dim=1).transpose(1, 2)

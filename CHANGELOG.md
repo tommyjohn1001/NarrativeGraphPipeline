@@ -2,6 +2,10 @@
 
 ### This file contains changes and modifications during developing.
 
+## June 28 2021, 0:48
+- Fix WEAM: loss is calculated by spare_p instead of output
+- Finish implementation of *do_predict*
+
 ## June 26 2021, 8:23
 
 - Apply **M-WEAM**

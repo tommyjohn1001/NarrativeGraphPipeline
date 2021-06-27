@@ -76,7 +76,7 @@ class NarrativeModel(plt.LightningModule):
             len_ans=len_ans,
             d_vocab=d_vocab,
             d_hid=d_hid,
-            cls_tok_id=self.bert_tokenizer.cls_token_id,
+            tokenizer=self.bert_tokenizer,
             embd_layer=self.embd_layer,
         )
 
@@ -196,7 +196,6 @@ class NarrativeModel(plt.LightningModule):
         if is_valid:
             pred = self.ans_infer.do_predict(
                 Y=Y,
-                ans_ids=ans_ids,
                 ans_mask=ans_mask,
             )
         else:
@@ -252,10 +251,10 @@ class NarrativeModel(plt.LightningModule):
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
         self.log(
-            "train/t", self.ans_infer.t, on_step=True, on_epoch=True, prog_bar=False
+            "train/t", self.ans_infer.t, on_step=True, on_epoch=False, prog_bar=False
         )
         self.log(
-            "train/r", self.ans_infer.r, on_step=True, on_epoch=True, prog_bar=False
+            "train/r", self.ans_infer.r, on_step=True, on_epoch=False, prog_bar=False
         )
 
         return {"loss": loss, "pred": prediction}
