@@ -59,6 +59,10 @@ class NarrativeModel(plt.LightningModule):
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
         self.datamodule: NarrativeDataModule = datamodule
 
+        self.teacher_forcing_ratio = torch.nn.parameter.Parameter(
+            torch.tensor(1, dtype=torch.float16)
+        )
+
         #############################
         # Define model
         #############################
@@ -76,7 +80,7 @@ class NarrativeModel(plt.LightningModule):
             len_ans=len_ans,
             d_vocab=d_vocab,
             d_hid=d_hid,
-            tokenizer=self.bert_tokenizer,
+            cls_tok_id=self.bert_tokenizer.cls_token_id,
             embd_layer=self.embd_layer,
         )
 
@@ -119,10 +123,8 @@ class NarrativeModel(plt.LightningModule):
 
         Returns:
             tuple: tuple of 4 scores
-
-
-
         """
+
         pred = self.process_sent(pred)
         ref = list(map(self.process_sent, ref))
 
@@ -188,26 +190,21 @@ class NarrativeModel(plt.LightningModule):
         # Do reasoning
         ####################
         Y = self.reasoning(ques=ques, context=context)
-        # [b, len_ans, d_hid]
+        # [b, len_para, d_hid]
 
         ####################
         # Generate answer
         ####################
-        if is_valid:
-            pred = self.ans_infer.do_predict(
-                Y=Y,
-                ans_mask=ans_mask,
-            )
-        else:
-            pred = self.ans_infer.do_train(
-                Y=Y,
-                ans_ids=ans_ids,
-                ans_mask=ans_mask,
-                cur_step=cur_step,
-                max_step=max_step,
-                cur_epoch=cur_epoch,
-            )
-        # pred: [b, len_ans, d_vocab]
+        pred = self.ans_infer.do_train(
+            Y=Y,
+            ans_ids=ans_ids,
+            ans_mask=ans_mask,
+            cur_step=cur_step,
+            max_step=max_step,
+            cur_epoch=cur_epoch,
+            is_valid=is_valid,
+        )
+        # pred: [b, len_ans, d_vocab_ex]
 
         return pred
 
@@ -232,9 +229,9 @@ class NarrativeModel(plt.LightningModule):
             // self.datamodule.batch_size,
             cur_epoch=self.current_epoch,
         )
-        # pred: [b, d_vocab, len_ans]
+        # pred: [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
 
@@ -251,10 +248,11 @@ class NarrativeModel(plt.LightningModule):
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
         self.log(
-            "train/t", self.ans_infer.t, on_step=True, on_epoch=False, prog_bar=False
-        )
-        self.log(
-            "train/r", self.ans_infer.r, on_step=True, on_epoch=False, prog_bar=False
+            "train/sampling",
+            self.ans_infer.t,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=False,
         )
 
         return {"loss": loss, "pred": prediction}
@@ -284,13 +282,10 @@ class NarrativeModel(plt.LightningModule):
             ans_mask=ans1_mask,
             context_ids=context_ids,
             context_mask=context_mask,
-            cur_step=batch_idx,
-            cur_epoch=self.current_epoch,
         )
-        # pred: [b, d_vocab, len_ans]
-        # pred: [b, d_vocab, len_ans]
+        # pred: [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -314,11 +309,9 @@ class NarrativeModel(plt.LightningModule):
             context_mask=context_mask,
             is_valid=True,
         )
-        # pred: [b, d_vocab, len_ans]
+        # pred: [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred, ans1_ids)
-
-        self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
 
@@ -332,6 +325,8 @@ class NarrativeModel(plt.LightningModule):
             }
             for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
         ]
+
+        self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
         return {"loss": loss, "pred": prediction}
 
@@ -379,10 +374,9 @@ class NarrativeModel(plt.LightningModule):
         context_ids,
         context_mask,
     ):
-        ## TODO: Finish implementation later
-        # ques_ids    : [b, len_ques]
-        # ques_mask   : [b, len_ques]
-        # context_ids : [b, n_paras, len_para]
+        # ques_ids: [b, len_ques]
+        # ques_mask: [b, len_ques]
+        # context_ids: [b, n_paras, len_para]
         # context_mask: [b, n_paras, len_para]
 
         b = ques_mask.size()[0]
@@ -396,14 +390,14 @@ class NarrativeModel(plt.LightningModule):
             ques_mask=ques_mask,
             context_mask=context_mask,
         )
-        # ques : [b, len_ques, d_bert]
-        # context: [b, n_paras, len_para, d_bert]
+        # ques : [b, len_ques, d_hid]
+        # context: [b, n_paras, len_para, d_hid]
 
         ####################
         # Do reasoning
         ####################
-        Y = self.reasoning(ques=ques, context=context, context_mask=context_mask)
-        # [b, len_ans, d_hid * 4]
+        Y = self.reasoning(ques=ques, context=context)
+        # [b, len_para, d_hid]
 
         ####################
         # Generate answer
@@ -417,7 +411,7 @@ class NarrativeModel(plt.LightningModule):
             max_len=self.len_ans,
             model=self.generate,
             no_repeat_ngram_size=self.n_gram_beam,
-            topk_strategy="select_mix_beam",
+            topk_strategy="topk",
         )
 
         for b_ in range(b):
@@ -430,9 +424,8 @@ class NarrativeModel(plt.LightningModule):
         return outputs
 
     def generate(self, decoder_input_ids, encoder_outputs):
-        ## TODO: Finish implementation later
-        # decoder_input_ids: [seq_len<=200]
-        # encoder_outputs  : [n_paras, len_para, d_hid * 4]
+        # decoder_input_ids: [list: len_]
+        # encoder_outputs  : [len_para, d_hid]
 
         decoder_input_ids = (
             torch.LongTensor(decoder_input_ids)
@@ -445,15 +438,15 @@ class NarrativeModel(plt.LightningModule):
         decoder_input_embd = self.embd_layer.encode_ans(
             decoder_input_ids, decoder_input_mask
         )
-        # [1, seq=*, d_bert]
+        # [1, len_, d_bert]
 
         encoder_outputs = encoder_outputs.unsqueeze(0)
 
         output = self.ans_infer(encoder_outputs, decoder_input_embd, decoder_input_mask)
-        # [1, seq=*, d_vocab]
+        # [1, len_, d_vocab]
 
         output = output.squeeze(0)
-        # [seq=*, d_vocab]
+        # [len_, d_vocab]
 
         return output
 
@@ -468,19 +461,26 @@ class NarrativeModel(plt.LightningModule):
         ques_mask = batch["ques_mask"]
         ans1_ids = batch["ans1_ids"]
         ans2_ids = batch["ans2_ids"]
-        ans1_mask = batch["ans1_mask"]
         context_ids = batch["context_ids"]
         context_mask = batch["context_mask"]
 
-        pred = self(ques, ques_mask, paras, paras_mask)
+        pred = self(
+            ques_ids=ques_ids,
+            ques_mask=ques_mask,
+            context_ids=context_ids,
+            context_mask=context_mask,
+        )
+        # pred: [b, len_ans, d_vocab]
 
         prediction = [
             {
                 "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ans1": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                "ans2": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                "ref": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                ],
             }
-            for pred_, ans1_, ans2_ in zip(pred, ans1, ans2)
+            for pred_, ans1_, ans2_ in zip(pred.squeeze(1), ans1_ids, ans2_ids)
         ]
 
         return prediction
@@ -488,6 +488,40 @@ class NarrativeModel(plt.LightningModule):
     def on_predict_batch_end(
         self, outputs: Optional[Any], batch: Any, batch_idx: int, dataloader_idx: int
     ) -> None:
-        ## TODO: Finish implementation later
+
+        #######################
+        # Calculate metrics
+        #######################
+        n_samples = 0
+        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
+        for pair in outputs:
+            try:
+                bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_scores(**pair)
+            except ValueError:
+                bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
+
+            bleu_1 += bleu_1_
+            bleu_4 += bleu_4_
+            meteor += meteor_
+            rouge_l += rouge_l_
+
+            n_samples += 1
+
+        #######################
+        # Log prediction and metrics
+        #######################
         with open(self.path_pred, "a+") as pred_file:
-            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+            json.dump(
+                {
+                    "metrics": {
+                        "bleu_1": bleu_1 / n_samples,
+                        "bleu_4": bleu_4 / n_samples,
+                        "meteor": meteor / n_samples,
+                        "rouge_l": rouge_l / n_samples,
+                    },
+                    "predictions": outputs,
+                },
+                pred_file,
+                indent=2,
+                ensure_ascii=False,
+            )
