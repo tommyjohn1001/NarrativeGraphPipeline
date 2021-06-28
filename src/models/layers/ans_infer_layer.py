@@ -218,9 +218,12 @@ class Decoder(torch_nn.Module):
         #################
         ## Recalculate output
         #################
-        output = output * mask
+        # TODO: no mater teacher forcing is used or not, spare_p still have to be calculated
+        spare_p = output * mask
         # [b, d_vocab]
-        spare_p = output / torch.sum(output, dim=1).unsqueeze(1).repeat(1, self.d_vocab)
+        spare_p = spare_p / torch.sum(spare_p, dim=1).unsqueeze(1).repeat(
+            1, self.d_vocab
+        )
         # [b, d_vocab]
         new_word = self.embd_layer.w_sum_ans(output)
         # [b, d_hid]
@@ -253,7 +256,7 @@ class Decoder(torch_nn.Module):
                 Y=Y,
                 input_embds=torch.cat(input_emds, dim=1),
                 input_masks=ans_mask[:, :ith],
-            )
+            )[:, -1, :]
             # [b, ith, d_vocab]
 
             ## Apply WEAM
@@ -283,7 +286,7 @@ class Decoder(torch_nn.Module):
 
             _, topi = torch.topk(spare_p, k=1)
             # [b, 1]
-            new_word = self.embd_layer.w_sum_ans(self.get_groundtruth(b, topi))
+            _, new_word = self.get_groundtruth(b, topi)
             # [b, d_hid]
 
             final.append(spare_p.unsqueeze(1))
