@@ -2,7 +2,13 @@
 
 ### This file contains changes and modifications during developing.
 
+## June 28 2021, 23:03
+
+- Add new Scheduled Sampling strategy
+- Reformat some field names
+
 ## June 20 2021, 14:43
+
 - Apply data _version 4_ for training: not removing stopwords, new HTML removing, start-end extraction
 - Reduce **n_paras** to _5_, **seq_len_ans** to _15_, increase **seq_len_para** to _170_
 - Reduce **n_nodes** and **n_edges** in Graph module respectively

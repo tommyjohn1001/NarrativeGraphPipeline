@@ -339,7 +339,7 @@ class BeamSearchOwn:
         Args:
             Y (torch.Tensor): Result tensfor from previous model
         """
-        # Y: [seq_len_contx, d_hid * 2]
+        # Y: [len_contx, d_hid * 2]
 
         queue = CustomPriorityQueue(self.beam_size, self.init_tok, "min")
 

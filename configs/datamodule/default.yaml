@@ -2,9 +2,9 @@ _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
 
 batch_size: ${batch_size}
 num_workers: ${num_workers}
-seq_len_ques: 42
-seq_len_para: 170
-seq_len_ans: 15
+len_ques: 42
+len_para: 170
+len_ans: 15
 len_para_processing: 150
 sizes_dataset:
   train: 32747
