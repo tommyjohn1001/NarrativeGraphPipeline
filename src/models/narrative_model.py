@@ -234,7 +234,7 @@ class NarrativeModel(plt.LightningModule):
         )
         # pred: [b, d_vocab, len_ans]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred, ans1_ids[:, 1:])
 
         _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
 
@@ -290,7 +290,7 @@ class NarrativeModel(plt.LightningModule):
         # pred: [b, d_vocab, len_ans]
         # pred: [b, d_vocab, len_ans]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred, ans1_ids[:, 1:])
 
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -316,7 +316,7 @@ class NarrativeModel(plt.LightningModule):
         )
         # pred: [b, d_vocab, len_ans]
 
-        loss = self.criterion(pred, ans1_ids)
+        loss = self.criterion(pred, ans1_ids[:, 1:])
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 

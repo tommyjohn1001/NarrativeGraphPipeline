@@ -43,7 +43,11 @@ class Decoder(torch_nn.Module):
         bert_conf.num_hidden_layers = 6
         self.trans_decoder = BertModel(config=bert_conf)
 
-        self.lin1 = torch_nn.Linear(d_hid, d_vocab)
+        self.lin1 = torch_nn.Sequential(
+            torch_nn.Linear(d_hid, d_hid),
+            torch_nn.Tanh(),
+            torch_nn.Linear(d_hid, d_vocab),
+        )
 
     def forward(
         self,
@@ -71,7 +75,7 @@ class Decoder(torch_nn.Module):
 
         return output
 
-    def get_groundtruth(self, b: int, ids: Any, output=None):
+    def get_new_word(self, b: int, ids: Any):
         # output: [b: d_vocab]
 
         #########################
@@ -90,12 +94,12 @@ class Decoder(torch_nn.Module):
         # [b, d_vocab]
 
         #########################
-        # Get word embedding
+        # Get new word embedding
         #########################
         new_word = self.embd_layer.w_sum_ans(mask)
         # [b, d_hid]
 
-        return output * mask if torch.torch.is_tensor(output) else None, new_word
+        return new_word
 
     def do_train(
         self,
@@ -117,12 +121,12 @@ class Decoder(torch_nn.Module):
         final = []
 
         ## Init input_embs with cls embedding
-        _, cls_embd = self.get_groundtruth(b, self.tokenizer.cls_token_id)
+        cls_embd = self.get_new_word(b, self.tokenizer.cls_token_id)
         # [b, d_hid]
 
         input_emds.append(cls_embd.unsqueeze(1))
 
-        for ith in range(1, self.len_ans + 1):
+        for ith in range(1, self.len_ans):
             output = self(
                 Y=Y,
                 input_embds=torch.cat(input_emds, dim=1),
@@ -167,31 +171,14 @@ class Decoder(torch_nn.Module):
         output = output[:, -1, :]
         # [b, d_vocab]
 
-        ## Create tensor 'pad_embd'
+        ###############################
+        ## Calculate spare_p
+        ###############################
 
-        ## If not exceed 15 epochs, keep using Teacher Forcing
-        if cur_epoch < 15:
-            if ith < self.len_ans:
-                return self.get_groundtruth(b, ans_ids[:, ith].unsqueeze(1), output)
-
-            return self.get_groundtruth(b, self.tokenizer.pad_token_id, output)
-
-        # Apply Scheduled Sampling
-        t = np.random.binomial(1, cur_step / max_step)
-        self.t = t
-        if t == 0:
-            if ith < self.len_ans:
-                return self.get_groundtruth(b, ans_ids[:, ith].unsqueeze(1), output)
-
-            return self.get_groundtruth(b, self.tokenizer.pad_token_id, output)
-
-        #################
-        ## Calculate eta
-        #################
-        r = np.random.binomial(1, max((cur_step / max_step, self.bigEPSILON)))
-        self.r = r
+        # Calculate eta
+        self.r = np.random.binomial(1, max((cur_step / max_step, self.bigEPSILON)))
         epsilon = torch.exp(torch.tensor(-self.epsilon))
-        if r == 0:
+        if self.r == 0:
             if ith < self.len_ans:
                 output_ = []
                 for b_ in range(b):
@@ -200,14 +187,12 @@ class Decoder(torch_nn.Module):
                 # [b]
                 ita = epsilon * output_
             else:
-                ita = epsilon * output[:, self.pad_tok_id]
+                ita = epsilon * output[:, self.tokenizer.pad_token_id]
         else:
             ita = epsilon * torch.max(epsilon * output, dim=-1)[0]
         # ita: [b]
 
-        #################
-        ## Calculate mask
-        #################
+        # Calculate mask
         mask = torch.where(
             output > ita.unsqueeze(1).repeat(1, self.d_vocab),
             torch.ones(output.size()).type_as(output),
@@ -215,18 +200,36 @@ class Decoder(torch_nn.Module):
         )
         # [b, d_vocab]
 
-        #################
-        ## Recalculate output
-        #################
-        # TODO: no mater teacher forcing is used or not, spare_p still have to be calculated
+        ## Calculate spare_p
         spare_p = output * mask
         # [b, d_vocab]
         spare_p = spare_p / torch.sum(spare_p, dim=1).unsqueeze(1).repeat(
             1, self.d_vocab
         )
-        # [b, d_vocab]
-        new_word = self.embd_layer.w_sum_ans(output)
-        # [b, d_hid]
+        # spare_p: [b, d_vocab]
+
+        ###############################
+        ## Determine word for next step
+        ###############################
+        new_word = None
+
+        ## If not exceed 15 epochs, keep using Teacher Forcing
+        if cur_epoch < 15:
+            if ith < self.len_ans:
+                new_word = self.get_new_word(b, ans_ids[:, ith].unsqueeze(1))
+            else:
+                new_word = self.get_new_word(b, self.tokenizer.pad_token_id)
+        else:
+            # Apply Scheduled Sampling
+            self.t = np.random.binomial(1, cur_step / max_step)
+            if self.t == 0:
+                if ith < self.len_ans:
+                    new_word = self.get_new_word(b, ans_ids[:, ith].unsqueeze(1))
+                else:
+                    new_word = self.get_new_word(b, self.tokenizer.pad_token_id)
+            else:
+                new_word = self.embd_layer.w_sum_ans(spare_p)
+            # new_word: [b, d_hid]
 
         return spare_p, new_word
 
@@ -246,12 +249,12 @@ class Decoder(torch_nn.Module):
         final = []
 
         ## Init input_embs with cls embedding
-        _, cls_embd = self.get_groundtruth(b, self.tokenizer.cls_token_id)
+        cls_embd = self.get_new_word(b, self.tokenizer.cls_token_id)
         # [b, d_hid]
 
         input_emds.append(cls_embd.unsqueeze(1))
 
-        for ith in range(1, self.len_ans + 1):
+        for ith in range(1, self.len_ans):
             output = self(
                 Y=Y,
                 input_embds=torch.cat(input_emds, dim=1),
@@ -286,7 +289,7 @@ class Decoder(torch_nn.Module):
 
             _, topi = torch.topk(spare_p, k=1)
             # [b, 1]
-            _, new_word = self.get_groundtruth(b, topi)
+            new_word = self.get_new_word(b, topi)
             # [b, d_hid]
 
             final.append(spare_p.unsqueeze(1))
