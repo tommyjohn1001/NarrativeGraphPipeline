@@ -87,7 +87,7 @@ class BertDecoder(torch_nn.Module):
             # [b]
             input_ids = torch.cat((input_ids, chosen.detach()), dim=1)
 
-        return output
+        return output.transpose(1, 2)
 
     def choose_teacher_forcing(
         self,

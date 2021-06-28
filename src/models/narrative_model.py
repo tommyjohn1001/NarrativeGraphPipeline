@@ -233,7 +233,7 @@ class NarrativeModel(plt.LightningModule):
         )
         # [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
         self.log(
@@ -278,7 +278,7 @@ class NarrativeModel(plt.LightningModule):
         )
         # [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -304,7 +304,7 @@ class NarrativeModel(plt.LightningModule):
         )
         # [b, len_ans, d_vocab]
 
-        loss = self.criterion(pred.transpose(1, 2)[:, :, :-1], ans1_ids[:, 1:])
+        loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -358,7 +358,7 @@ class NarrativeModel(plt.LightningModule):
         if self.current_epoch % self.switch_frequency == 0 and self.current_epoch != 0:
             self.datamodule.switch_answerability()
 
-            if self.current_epoch >= 8:
+            if self.current_epoch >= 15:
                 self.teacher_forcing_ratio = torch_nn.parameter.Parameter(
                     max(self.teacher_forcing_ratio - 0.3, 0)
                 )
