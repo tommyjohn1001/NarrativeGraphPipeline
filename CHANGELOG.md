@@ -2,6 +2,11 @@
 
 ### This file contains changes and modifications during developing.
 
+## July 1, 16:29
+
+- Remove WEAM, replace by simpler Scheduled Sampling
+- Add OT loss
+
 ## June 28 2021, 0:48
 
 - Fix WEAM: loss is calculated by spare_p instead of output

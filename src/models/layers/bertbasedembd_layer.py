@@ -57,13 +57,13 @@ class BertBasedEmbedding(torch_nn.Module):
     def encode_ans(self, input_ids):
         # input_ids : [b, len_]
 
-        spare_p = self.bert_emb.embeddings.word_embeddings(input_ids)
+        encoded = self.bert_emb.embeddings.word_embeddings(input_ids)
         # [b, len_, d_bert]
 
-        new_word = self.lin1(spare_p)
+        encoded = self.lin1(encoded)
         # [b, len_, d_hid]
 
-        return spare_p, new_word
+        return encoded
 
     def w_sum_ans(self, input_embds):
         # input_embds : [b, d_vocab]
