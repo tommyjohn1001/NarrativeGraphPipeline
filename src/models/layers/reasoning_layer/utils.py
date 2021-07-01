@@ -262,8 +262,8 @@ class MemoryBasedQuesRectifier(torch_nn.Module):
 class MemoryBasedContextRectifier(torch_nn.Module):
     def __init__(
         self,
-        len_para: int = 170,
-        n_paras: int = 5,
+        len_para: int = 500,
+        n_paras: int = 3,
         d_hid: int = 64,
         n_heads_trans: int = 8,
         n_layers_trans: int = 8,

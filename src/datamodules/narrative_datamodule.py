@@ -1,7 +1,6 @@
 from torch.utils.data import DataLoader
 import pytorch_lightning as plt
 
-from src.datamodules.utils import CustomSampler
 from src.datamodules.dataset import NarrativeDataset
 
 # from src.datamodules.preprocess import Preprocess
@@ -18,9 +17,9 @@ class NarrativeDataModule(plt.LightningDataModule):
         batch_size: int = 5,
         len_ques: int = 42,
         len_para_processing: int = 120,
-        len_para: int = 170,
+        len_para: int = 500,
         len_ans: int = 42,
-        n_paras: int = 5,
+        n_paras: int = 3,
         num_workers: int = 4,
     ):
 
@@ -70,51 +69,29 @@ class NarrativeDataModule(plt.LightningDataModule):
             "num_worker": self.num_workers,
         }
         if stage == "fit":
-            self.data_train = NarrativeDataset(
-                "train", size_dataset=self.sizes_dataset["train"], **dataset_args
-            )
-            self.data_valid = NarrativeDataset(
-                "valid", size_dataset=self.sizes_dataset["valid"], **dataset_args
-            )
+            self.data_train = NarrativeDataset("train", **dataset_args)
+            self.data_valid = NarrativeDataset("valid", **dataset_args)
         else:
-            self.data_test = NarrativeDataset(
-                "test", size_dataset=self.sizes_dataset["test"], **dataset_args
-            )
+            self.data_test = NarrativeDataset("test", **dataset_args)
 
     def train_dataloader(self):
         """Return DataLoader for training."""
-        return DataLoader(
-            dataset=self.data_train,
-            batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["train"]),
-        )
+        return DataLoader(dataset=self.data_train, batch_size=self.batch_size)
 
     def val_dataloader(self):
         """Return DataLoader for validation."""
 
-        return DataLoader(
-            dataset=self.data_valid,
-            batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["valid"]),
-        )
+        return DataLoader(dataset=self.data_valid, batch_size=self.batch_size)
 
     def test_dataloader(self):
         """Return DataLoader for test."""
 
-        return DataLoader(
-            dataset=self.data_test,
-            batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["test"]),
-        )
+        return DataLoader(dataset=self.data_test, batch_size=self.batch_size)
 
     def predict_dataloader(self):
         """Return DataLoader for prediction."""
 
-        return DataLoader(
-            dataset=self.data_test,
-            batch_size=self.batch_size,
-            sampler=CustomSampler(self.sizes_dataset["test"]),
-        )
+        return DataLoader(dataset=self.data_test, batch_size=self.batch_size)
 
     def switch_answerability(self):
         self.data_train.switch_answerability()

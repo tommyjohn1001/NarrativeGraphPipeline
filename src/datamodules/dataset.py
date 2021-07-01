@@ -1,12 +1,8 @@
-from random import sample
-import glob
-
 from torch.utils.data import Dataset
 import torch
 from transformers import BertTokenizer
 import pandas as pd
 import numpy as np
-
 
 from src.utils.utils import ParallelHelper
 
@@ -17,24 +13,18 @@ class NarrativeDataset(Dataset):
         split: str,
         path_data: str,
         path_bert: str,
-        size_dataset: int,
         len_ques: int = 42,
-        len_para: int = 170,
+        len_para: int = 500,
         len_ans: int = 15,
-        n_paras: int = 5,
+        n_paras: int = 3,
         num_worker: int = 1,
     ):
 
-        self.split = split
         self.len_ques = len_ques
         self.len_para = len_para
         self.len_ans = len_ans
         self.n_paras = n_paras
         self.num_workers = num_worker
-        self.size_dataset = size_dataset
-
-        path_data = path_data.replace("[SPLIT]", split).replace("[SHARD]", "*")
-        self.paths = sorted(glob.glob(path_data))
 
         self.tokenizer = BertTokenizer.from_pretrained(path_bert)
 
@@ -48,31 +38,14 @@ class NarrativeDataset(Dataset):
         self.context_ids = None
         self.context_mask = None
 
-        self.exchange_rate = 0
+        self.read_datasetfile(path_data.replace("[SPLIT]", split))
 
     def __len__(self) -> int:
-        return self.size_dataset
+        return len(self.ques_ids)
 
     def __getitem__(self, indx):
         if torch.is_tensor(indx):
             indx = indx.tolist()
-
-        size_shard = self.size_dataset // 8
-
-        ith_file = indx // size_shard
-        indx = indx % size_shard
-
-        if ith_file == 8:
-            ith_file -= 1
-            indx = indx + size_shard
-
-        # Check nth file and reload dataset if needed
-        if ith_file != self.curent_ith_file:
-            self.curent_ith_file = ith_file
-
-            # Reload dataset
-            # gc.collect()
-            self.read_datasetfile(self.paths[self.curent_ith_file])
 
         return {
             # 'docId'         : self.docId[indx],
@@ -85,16 +58,6 @@ class NarrativeDataset(Dataset):
             "context_ids": self.context_ids[indx],
             "context_mask": self.context_mask[indx],
         }
-
-    def _get_context(self, En, Hn):
-        n_samples = min((len(En), self.n_paras))
-        if self.split == "train":
-            selects_Hn = int(n_samples * self.exchange_rate)
-            selects_En = n_samples - selects_Hn
-
-            return sample(En, selects_En) + sample(Hn, selects_Hn)
-
-        return sample(Hn, n_samples)
 
     def f_process_file_multi(self, entries, queue):
         for entry in entries.itertuples():
@@ -148,10 +111,7 @@ class NarrativeDataset(Dataset):
         ###########################
         # Process context
         ###########################
-        En = entry.En.tolist()
-        Hn = entry.Hn.tolist()
-
-        contx = self._get_context(En, Hn)
+        contx = entry.context.tolist()
 
         # Process context
         context_ids = np.zeros((self.n_paras, self.len_para), dtype=np.int)
@@ -179,7 +139,6 @@ class NarrativeDataset(Dataset):
         }
 
     def read_datasetfile(self, path_file):
-        # NOTE: In future, when data format is Parquet, this line must be fixed
         df = pd.read_parquet(path_file)
 
         # self.docId          = []
@@ -218,9 +177,3 @@ class NarrativeDataset(Dataset):
             self.ans1_mask.append(entry["ans1_mask"])
             self.context_ids.append(entry["context_ids"])
             self.context_mask.append(entry["context_mask"])
-
-    def switch_answerability(self):
-        if self.exchange_rate == 1:
-            self.exchange_rate = 0
-        else:
-            self.exchange_rate += 0.25

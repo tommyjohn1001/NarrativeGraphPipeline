@@ -3,8 +3,9 @@
 ### This file contains changes and modifications during developing.
 
 ## June 28 2021, 0:48
+
 - Fix WEAM: loss is calculated by spare_p instead of output
-- Finish implementation of *do_predict*
+- Finish implementation of _do_predict_
 
 ## June 26 2021, 8:23
 
@@ -28,7 +29,7 @@
 ## June 19 2021, 11:46
 
 - Apply data _version 4_ for training: not removing stopwords, new HTML removing, start-end extraction
-- Reduce **n_paras** to _5_, **len_ans** to _15_, increase **len_para** to _170_
+- Reduce **n_paras** to _5_, **len_ans** to _15_, increase **len_para** to _500_
 - Officially use BertVocab instead of own vocab
 - Use **parquet** data format instead **csv**
 - Change name of fields in _dataset.py_: **ques** to **ques_ids**, **paras** to **context_ids**,...

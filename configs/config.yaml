@@ -44,7 +44,7 @@ ignore_warnings: True
 PATH:
   raw_data: /root/NarrativeQA
   processed_contx: ${data_dir}/proc_contx/[ID].json
-  data: ${data_dir}/[SPLIT]/data_[SHARD].parquet
+  data: ${data_dir}/data_[SPLIT].parquet
 
   bert: ${data_dir}/bert-base-uncased
 

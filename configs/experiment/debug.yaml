@@ -43,9 +43,9 @@ model:
   _target_: src.models.narrative_model.NarrativeModel
 
   len_ques: 42
-  len_para: 170
+  len_para: 500
   len_ans: 15
-  n_paras: 5
+  n_paras: 3
   n_layers_trans: 3
   n_heads_trans: 4
   d_hid: 64
@@ -67,7 +67,7 @@ datamodule:
   batch_size: ${batch_size}
   num_workers: ${num_workers}
   len_ques: 42
-  len_para: 170
+  len_para: 500
   len_para_processing: 120
   len_ans: 15
   sizes_dataset:
