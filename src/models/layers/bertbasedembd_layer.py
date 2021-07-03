@@ -54,24 +54,34 @@ class BertBasedEmbedding(torch_nn.Module):
 
         return ques, context
 
-    def encode_ans(self, input_ids):
-        # input_ids : [b, len_]
+    def encode_ans(self, ans_ids, ans_mask):
+        # ans_ids : [b, len_ans]
+        # ans_mask : [b, len_ans]
 
-        spare_p = self.bert_emb.embeddings.word_embeddings(input_ids)
-        # [b, len_, d_bert]
+        ans = self.bert_emb(input_ids=ans_ids, attention_mask=ans_mask)[0]
 
-        new_word = self.lin1(spare_p)
-        # [b, len_, d_hid]
+        return self.lin1(ans)
+        # [b, len_ans, d_hid]
 
-        return spare_p, new_word
 
-    def w_sum_ans(self, input_embds):
-        # input_embds : [b, d_vocab]
+    # def encode_ans(self, input_ids):
+    #     # input_ids : [b, len_]
 
-        output = input_embds @ self.bert_emb.embeddings.word_embeddings.weight
-        # [b, d_bert]
+    #     spare_p = self.bert_emb.embeddings.word_embeddings(input_ids)
+    #     # [b, len_, d_bert]
 
-        output = self.lin1(output)
-        # [b, d_hid]
+    #     new_word = self.lin1(spare_p)
+    #     # [b, len_, d_hid]
 
-        return output
+    #     return spare_p, new_word
+
+    # def w_sum_ans(self, input_embds):
+    #     # input_embds : [b, d_vocab]
+
+    #     output = input_embds @ self.bert_emb.embeddings.word_embeddings.weight
+    #     # [b, d_bert]
+
+    #     output = self.lin1(output)
+    #     # [b, d_hid]
+
+    #     return output

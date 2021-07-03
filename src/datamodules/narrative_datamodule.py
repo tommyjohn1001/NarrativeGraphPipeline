@@ -13,7 +13,6 @@ class NarrativeDataModule(plt.LightningDataModule):
         path_processed_contx: str,
         path_data: str,
         path_bert: str,
-        sizes_dataset: dict,
         batch_size: int = 5,
         len_ques: int = 42,
         len_para_processing: int = 120,
@@ -36,7 +35,6 @@ class NarrativeDataModule(plt.LightningDataModule):
         self.path_data = path_data
         self.path_bert = path_bert
         self.num_workers = num_workers
-        self.sizes_dataset = sizes_dataset
 
         self.data_train = None
         self.data_test = None

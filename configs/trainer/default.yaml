@@ -10,7 +10,7 @@ auto_scale_batch_size: False
 gradient_clip_val: 1.0
 accelerator: null
 precision: 16
-check_val_every_n_epoch: 5
+check_val_every_n_epoch: 2
 reload_dataloaders_every_epoch: True
 weights_summary: "top"
 progress_bar_refresh_rate: 5

@@ -3,7 +3,7 @@ _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
 batch_size: ${batch_size}
 num_workers: ${num_workers}
 len_ques: 42
-len_para: 170
+len_para: 500
 len_para_processing: 120
 len_ans: 15
 

@@ -33,7 +33,7 @@ trainer:
   gradient_clip_val: 1.0
   accelerator: null
   precision: 16
-  check_val_every_n_epoch: 5
+  check_val_every_n_epoch: 2
   reload_dataloaders_every_epoch: True
   weights_summary: "top"
   progress_bar_refresh_rate: 5
@@ -61,6 +61,7 @@ model:
   path_pred: ${PATH.pred}
   path_train_pred: ${PATH.train_pred}
 
+
 datamodule:
   _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
 
@@ -70,15 +71,12 @@ datamodule:
   len_para: 500
   len_para_processing: 120
   len_ans: 15
-  sizes_dataset:
-    train: 32747
-    test: 10557
-    valid: 3461
 
   path_bert: ${PATH.bert}
   path_data: ${PATH.data}
   path_raw_data: ${PATH.raw_data}
   path_processed_contx: ${PATH.processed_contx}
+
 
 callbacks:
   model_checkpoint:
@@ -89,9 +87,3 @@ callbacks:
     mode: "min"
     dirpath: "checkpoints/"
     filename: "narrative-{epoch:02d}"
-
-  early_stopping:
-    _target_: pytorch_lightning.callbacks.EarlyStopping
-    monitor: "valid/loss"
-    patience: 10
-    mode: "min"

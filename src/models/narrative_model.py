@@ -225,8 +225,7 @@ class NarrativeModel(plt.LightningModule):
             context_ids=context_ids,
             context_mask=context_mask,
             cur_step=batch_idx,
-            max_step=self.datamodule.data_train.size_dataset
-            // self.datamodule.batch_size,
+            max_step=len(self.datamodule.data_train) // self.datamodule.batch_size,
             cur_epoch=self.current_epoch,
         )
         # pred: [b, len_ans, d_vocab]
