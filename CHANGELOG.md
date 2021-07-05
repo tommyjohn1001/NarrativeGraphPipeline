@@ -2,6 +2,12 @@
 
 ### This file contains changes and modifications during developing.
 
+## July 5, 10:53
+
+- Optimizer calculating OT loss
+- Refactor code in some modules
+- Modify way of obtaining final distribution for calculating loss
+
 ## July 1, 16:29
 
 - Remove WEAM, replace by simpler Scheduled Sampling

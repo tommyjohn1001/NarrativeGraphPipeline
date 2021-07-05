@@ -197,7 +197,6 @@ def finish(
 import multiprocessing
 import re
 
-import torch.nn.functional as torch_f
 import torch
 from rouge import Rouge
 from nltk.translate.meteor_score import meteor_score
@@ -282,13 +281,9 @@ def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=1000, L=1):
     # [n, d_hid]
 
     # Calculate matrix C
-    C = []
-    for i in range(n):
-        for j in range(n):
-            a1_ = a1[i].unsqueeze(0)
-            a2_ = a2[j].unsqueeze(0)
-            C.append(torch_f.cosine_similarity(a1_, a2_).unsqueeze(0))
-    C = torch.cat(C, dim=0).view(n, n)
+    a1_norm = a1 / a1.norm(dim=1)[:, None]
+    a2_norm = a2 / a2.norm(dim=1)[:, None]
+    C = a1_norm @ a2_norm.transpose(0, 1)
     # [n, n]
 
     sigma = torch.ones((n, 1), device=a1.device) / n

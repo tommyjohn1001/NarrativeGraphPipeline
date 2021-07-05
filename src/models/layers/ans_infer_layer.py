@@ -55,10 +55,12 @@ class Decoder(torch_nn.Module):
         # input_embds: [b, len_, d_vocab]
         # input_masks: [b, len_]
 
-        # [b, d_hid]
+        encoded = self.embd_layer.encode_ans(
+            input_embds=input_embds, input_masks=input_masks
+        )
 
         output = self.trans_decoder(
-            inputs_embeds=input_embds,
+            inputs_embeds=encoded,
             attention_mask=input_masks,
             encoder_hidden_states=Y,
         )[0]
@@ -67,7 +69,7 @@ class Decoder(torch_nn.Module):
         output = self.lin1(output)
         # [b, len_, d_vocab]
 
-        output = torch.softmax(output, dim=-1)
+        # output = torch.softmax(output, dim=-1)
 
         return output
 
@@ -76,11 +78,11 @@ class Decoder(torch_nn.Module):
         if not torch.is_tensor(ids):
             assert isinstance(ids, int)
             ids = torch.full(
-                (b, 1), fill_value=ids, device=self.device, requires_grad=False
+                (b,), fill_value=ids, device=self.device, requires_grad=False
             )
 
-        new_word = self.embd_layer.encode_ans(ids)
-        # [b, d_hid]
+        new_word = self.embd_layer.get_w_embd(input_ids=ids)
+        # [b, d_bert]
 
         return new_word
 
@@ -100,14 +102,11 @@ class Decoder(torch_nn.Module):
         b = Y.size(0)
         self.device = Y.device
 
-        input_emds = []
-        final = []
-
         ## Init input_embs with cls embedding
         cls_embd = self.get_new_word(b, self.tokenizer.cls_token_id)
         # [b, d_hid]
 
-        input_emds.append(cls_embd.unsqueeze(1))
+        input_emds = [cls_embd.unsqueeze(1)]
 
         for ith in range(1, self.len_ans):
             output = self(
@@ -117,20 +116,27 @@ class Decoder(torch_nn.Module):
             )
             # [b, ith, d_vocab]
 
-            ## Apply WEAM
-            new_word = self.choose_scheduled_sampling(
-                output=output,
-                ans_ids=ans_ids,
-                cur_step=cur_step,
-                max_step=max_step,
-                cur_epoch=cur_epoch,
-            )
-            # new_word: [b, d_hid]
+            if ith < self.len_ans - 1:
+                ## Apply WEAM
+                new_word = self.choose_scheduled_sampling(
+                    output=torch.softmax(output, dim=-1),
+                    ans_ids=ans_ids,
+                    cur_step=cur_step,
+                    max_step=max_step,
+                    cur_epoch=cur_epoch,
+                )
+                # new_word: [b, d_bert]
 
-            final.append(output[:, -1, :].unsqueeze(1))
-            input_emds.append(new_word.unsqueeze(1))
+                input_emds.append(new_word.unsqueeze(1))
 
-        return torch.cat(final, dim=1).transpose(1, 2)
+        ## Get output for OT
+        output_ot = self.embd_layer.get_output_ot(output)
+        # [b, len_ans - 1, d_hid]
+
+        output_mle = output.transpose(1, 2)
+        # [b, d_vocab, len_ans - 1]
+
+        return output_mle, output_ot
 
     ##############################################
     # Methods for scheduled sampling
@@ -162,11 +168,11 @@ class Decoder(torch_nn.Module):
         self.t = t
 
         new_word = (
-            self.get_new_word(b, ans_ids[:, ith].unsqueeze(1))
+            self.get_new_word(b, ans_ids[:, ith])
             if self.t == 0
-            else self.embd_layer.w_sum_ans(output[:, -1, :])
+            else self.embd_layer.get_w_embd(input_embds=output[:, -1, :])
         )
-        # new_word: [b, d_hid]
+        # new_word: [b, d_bert]
 
         return new_word
 
@@ -182,30 +188,33 @@ class Decoder(torch_nn.Module):
         b = Y.size(0)
         self.device = Y.device
 
-        input_emds = []
-        final = []
-
         ## Init input_embs with cls embedding
         cls_embd = self.get_new_word(b, self.tokenizer.cls_token_id)
         # [b, d_hid]
 
-        input_emds.append(cls_embd.unsqueeze(1))
+        input_emds = [cls_embd.unsqueeze(1)]
 
         for ith in range(1, self.len_ans):
             output = self(
                 Y=Y,
                 input_embds=torch.cat(input_emds, dim=1),
                 input_masks=ans_mask[:, :ith],
-            )[:, -1, :]
-            # [b, d_vocab]
+            )
+            # [b, ith, d_vocab]
 
-            ## Apply WEAM
-            _, topi = torch.topk(output, k=1)
-            # [b, 1]
-            new_word = self.get_new_word(b, topi)
-            # [b, d_hid]
+            if ith < self.len_ans - 1:
+                ## Apply WEAM
+                _, topi = torch.topk(output, k=1)
+                # [b, 1]
+                new_word = self.get_new_word(b, topi[:, -1])
 
-            final.append(output.unsqueeze(1))
-            input_emds.append(new_word.unsqueeze(1))
+                input_emds.append(new_word)
 
-        return torch.cat(final, dim=1).transpose(1, 2)
+        ## Get output for OT
+        output_ot = self.embd_layer.get_output_ot(output)
+        # [b, len_ans - 1, d_hid]
+
+        output_mle = output.transpose(1, 2)
+        # [b, d_vocab, len_ans - 1]
+
+        return output_mle, output_ot

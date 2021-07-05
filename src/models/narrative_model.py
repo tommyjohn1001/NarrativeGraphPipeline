@@ -98,25 +98,40 @@ class NarrativeModel(plt.LightningModule):
     # FOR TRAINING PURPOSE
     ####################################################################
 
-    def calc_loss(self, pred, ans_ids, ans_mask, gamma=0.1):
-        # pred: [b, d_vocab, len_ans-1]
+    def get_loss(self, output_mle, output_ot, ans_ids, ans_mask, gamma=0.1):
+        # output_mle: [b, d_vocab, len_ans-1]
+        # output_ot: [b, len_ans-1, d_hid]
         # ans_ids: [b, len_ans-1]
         # ans_mask: [b, len_ans-1]
 
         # Calculate MLE loss
-        loss_mle = self.criterion(pred, ans_ids)
+        loss_mle = self.criterion(output_mle, ans_ids)
 
         # Calculate OT loss
-        ans = self.embd_layer.encode_ans(ans_ids * ans_mask)[1]
-        # [b, len_ans-1, d_hid]
-        pred_ = self.embd_layer.w_sum_ans(pred.transpose(1, 2))
+        ans = self.embd_layer.encode_ans(input_ids=ans_ids, input_masks=ans_mask)
         # [b, len_ans-1, d_hid]
 
-        loss_ot = ipot(pred_, ans)
+        loss_ot = ipot(output_ot, ans)
 
         total_loss = loss_mle + gamma * loss_ot
 
         return total_loss
+
+    def get_prediction(self, output_mle, ans1_ids, ans2_ids):
+        _, prediction = torch.topk(torch_F.log_softmax(output_mle, dim=1), 1, dim=1)
+
+        prediction = [
+            {
+                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
+                "ref": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                ],
+            }
+            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
+        ]
+
+        return prediction
 
     def model(
         self,
@@ -160,22 +175,20 @@ class NarrativeModel(plt.LightningModule):
         # Generate answer
         ####################
         if is_valid:
-            pred = self.ans_infer.do_predict(
+            return self.ans_infer.do_predict(
                 Y=Y,
                 ans_mask=ans_mask,
             )
-        else:
-            pred = self.ans_infer.do_train(
-                Y=Y,
-                ans_ids=ans_ids,
-                ans_mask=ans_mask,
-                cur_step=cur_step,
-                max_step=max_step,
-                cur_epoch=cur_epoch,
-            )
-        # pred: [b, len_ans, d_vocab]
 
-        return pred
+        return self.ans_infer.do_train(
+            Y=Y,
+            ans_ids=ans_ids,
+            ans_mask=ans_mask,
+            cur_step=cur_step,
+            max_step=max_step,
+            cur_epoch=cur_epoch,
+        )
+        # pred: [b, len_ans, d_vocab]
 
     def training_step(self, batch: Any, batch_idx: int):
         ques_ids = batch["ques_ids"]
@@ -186,7 +199,7 @@ class NarrativeModel(plt.LightningModule):
         context_ids = batch["context_ids"]
         context_mask = batch["context_mask"]
 
-        pred = self.model(
+        output_mle, output_ot = self.model(
             ques_ids=ques_ids,
             ques_mask=ques_mask,
             ans_ids=ans1_ids,
@@ -198,21 +211,11 @@ class NarrativeModel(plt.LightningModule):
             // self.datamodule.batch_size,
             cur_epoch=self.current_epoch,
         )
-        # pred: [b, d_vocab, len_ans-1]
-        loss = self.calc_loss(pred, ans1_ids[:, 1:], ans1_mask[:, 1:])
+        # output_ot: [b, len_ans - 1, d_hid]
+        # output_mle: [b, d_vocab, len_ans - 1]
 
-        _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
-
-        prediction = [
-            {
-                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ref": [
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
-                ],
-            }
-            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
-        ]
+        loss = self.get_loss(output_mle, output_ot, ans1_ids[:, 1:], ans1_mask[:, 1:])
+        prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
         self.log(
@@ -239,7 +242,7 @@ class NarrativeModel(plt.LightningModule):
         context_ids = batch["context_ids"]
         context_mask = batch["context_mask"]
 
-        pred = self.model(
+        output_mle, output_ot = self.model(
             ques_ids=ques_ids,
             ques_mask=ques_mask,
             ans_ids=ans1_ids,
@@ -249,9 +252,10 @@ class NarrativeModel(plt.LightningModule):
             cur_step=batch_idx,
             cur_epoch=self.current_epoch,
         )
-        # pred: [b, d_vocab, len_ans-1]
+        # output_ot: [b, len_ans - 1, d_hid]
+        # output_mle: [b, d_vocab, len_ans - 1]
 
-        loss = self.calc_loss(pred, ans1_ids[:, 1:], ans1_mask[:, 1:])
+        loss = self.get_loss(output_mle, output_ot, ans1_ids[:, 1:], ans1_mask[:, 1:])
 
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -266,7 +270,7 @@ class NarrativeModel(plt.LightningModule):
         context_ids = batch["context_ids"]
         context_mask = batch["context_mask"]
 
-        pred = self.model(
+        output_mle, output_ot = self.model(
             ques_ids=ques_ids,
             ques_mask=ques_mask,
             ans_ids=ans1_ids,
@@ -275,24 +279,13 @@ class NarrativeModel(plt.LightningModule):
             context_mask=context_mask,
             is_valid=True,
         )
-        # pred: [b, d_vocab, len_ans-1]
+        # output_ot: [b, len_ans - 1, d_hid]
+        # output_mle: [b, d_vocab, len_ans - 1]
 
-        loss = self.calc_loss(pred, ans1_ids[:, 1:], ans1_mask[:, 1:])
+        loss = self.get_loss(output_mle, output_ot, ans1_ids[:, 1:], ans1_mask[:, 1:])
+        prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
-
-        _, prediction = torch.topk(torch_F.log_softmax(pred, dim=1), 1, dim=1)
-
-        prediction = [
-            {
-                "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ref": [
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
-                ],
-            }
-            for pred_, ans1_, ans2_ in zip(prediction.squeeze(1), ans1_ids, ans2_ids)
-        ]
 
         return {"loss": loss, "pred": prediction}
 
@@ -340,10 +333,9 @@ class NarrativeModel(plt.LightningModule):
         context_ids,
         context_mask,
     ):
-        ## TODO: Finish implementation later
-        # ques_ids    : [b, len_ques]
-        # ques_mask   : [b, len_ques]
-        # context_ids : [b, n_paras, len_para]
+        # ques_ids: [b, len_ques]
+        # ques_mask: [b, len_ques]
+        # context_ids: [b, n_paras, len_para]
         # context_mask: [b, n_paras, len_para]
 
         b = ques_mask.size()[0]
@@ -357,14 +349,14 @@ class NarrativeModel(plt.LightningModule):
             ques_mask=ques_mask,
             context_mask=context_mask,
         )
-        # ques : [b, len_ques, d_bert]
-        # context: [b, n_paras, len_para, d_bert]
+        # ques : [b, len_ques, d_hid]
+        # context: [b, n_paras, len_para, d_hid]
 
         ####################
         # Do reasoning
         ####################
-        Y = self.reasoning(ques=ques, context=context, context_mask=context_mask)
-        # [b, len_ans, d_hid * 4]
+        Y = self.reasoning(ques=ques, context=context)
+        # [b, len_para, d_hid]
 
         ####################
         # Generate answer
@@ -378,7 +370,7 @@ class NarrativeModel(plt.LightningModule):
             max_len=self.len_ans,
             model=self.generate,
             no_repeat_ngram_size=self.n_gram_beam,
-            topk_strategy="select_mix_beam",
+            topk_strategy="topk",
         )
 
         for b_ in range(b):
@@ -391,9 +383,8 @@ class NarrativeModel(plt.LightningModule):
         return outputs
 
     def generate(self, decoder_input_ids, encoder_outputs):
-        ## TODO: Finish implementation later
-        # decoder_input_ids: [seq_len<=200]
-        # encoder_outputs  : [n_paras, len_para, d_hid * 4]
+        # decoder_input_ids: [list: len_]
+        # encoder_outputs  : [len_para, d_hid]
 
         decoder_input_ids = (
             torch.LongTensor(decoder_input_ids)
@@ -404,17 +395,17 @@ class NarrativeModel(plt.LightningModule):
 
         decoder_input_mask = torch.ones(decoder_input_ids.shape, device=self.device)
         decoder_input_embd = self.embd_layer.encode_ans(
-            decoder_input_ids, decoder_input_mask
+            input_ids=decoder_input_ids, input_masks=decoder_input_mask
         )
-        # [1, seq=*, d_bert]
+        # [1, len_, d_bert]
 
         encoder_outputs = encoder_outputs.unsqueeze(0)
 
         output = self.ans_infer(encoder_outputs, decoder_input_embd, decoder_input_mask)
-        # [1, seq=*, d_vocab]
+        # [1, len_, d_vocab]
 
         output = output.squeeze(0)
-        # [seq=*, d_vocab]
+        # [len_, d_vocab]
 
         return output
 
@@ -424,24 +415,30 @@ class NarrativeModel(plt.LightningModule):
         batch_idx: int,
         dataloader_idx: Optional[int],
     ) -> Any:
-        ## TODO: Finish implementation later
         ques_ids = batch["ques_ids"]
         ques_mask = batch["ques_mask"]
         ans1_ids = batch["ans1_ids"]
         ans2_ids = batch["ans2_ids"]
-        ans1_mask = batch["ans1_mask"]
         context_ids = batch["context_ids"]
         context_mask = batch["context_mask"]
 
-        pred = self(ques, ques_mask, paras, paras_mask)
+        pred = self(
+            ques_ids=ques_ids,
+            ques_mask=ques_mask,
+            context_ids=context_ids,
+            context_mask=context_mask,
+        )
+        # pred: [b, len_ans, d_vocab]
 
         prediction = [
             {
                 "pred": " ".join(self.bert_tokenizer.convert_ids_to_tokens(pred_)),
-                "ans1": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
-                "ans2": " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                "ref": [
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans1_)),
+                    " ".join(self.bert_tokenizer.convert_ids_to_tokens(ans2_)),
+                ],
             }
-            for pred_, ans1_, ans2_ in zip(pred, ans1, ans2)
+            for pred_, ans1_, ans2_ in zip(pred.squeeze(1), ans1_ids, ans2_ids)
         ]
 
         return prediction
@@ -449,6 +446,40 @@ class NarrativeModel(plt.LightningModule):
     def on_predict_batch_end(
         self, outputs: Optional[Any], batch: Any, batch_idx: int, dataloader_idx: int
     ) -> None:
-        ## TODO: Finish implementation later
+
+        #######################
+        # Calculate metrics
+        #######################
+        n_samples = 0
+        bleu_1, bleu_4, meteor, rouge_l = 0, 0, 0, 0
+        for pair in outputs:
+            try:
+                bleu_1_, bleu_4_, meteor_, rouge_l_ = self.get_scores(**pair)
+            except ValueError:
+                bleu_1_, bleu_4_, meteor_, rouge_l_ = 0, 0, 0, 0
+
+            bleu_1 += bleu_1_
+            bleu_4 += bleu_4_
+            meteor += meteor_
+            rouge_l += rouge_l_
+
+            n_samples += 1
+
+        #######################
+        # Log prediction and metrics
+        #######################
         with open(self.path_pred, "a+") as pred_file:
-            json.dump(outputs, pred_file, indent=2, ensure_ascii=False)
+            json.dump(
+                {
+                    "metrics": {
+                        "bleu_1": bleu_1 / n_samples,
+                        "bleu_4": bleu_4 / n_samples,
+                        "meteor": meteor / n_samples,
+                        "rouge_l": rouge_l / n_samples,
+                    },
+                    "predictions": outputs,
+                },
+                pred_file,
+                indent=2,
+                ensure_ascii=False,
+            )

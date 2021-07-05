@@ -1,7 +1,7 @@
 from transformers import BertModel
 import transformers
 import torch.nn as torch_nn
-
+import torch
 
 transformers.logging.set_verbosity_error()
 
@@ -54,10 +54,38 @@ class BertBasedEmbedding(torch_nn.Module):
 
         return ques, context
 
-    def encode_ans(self, input_ids):
+    def get_w_embd(self, input_ids=None, input_embds=None):
         # input_ids : [b, len_]
 
-        encoded = self.bert_emb.embeddings.word_embeddings(input_ids)
+        assert torch.is_tensor(input_ids) or torch.is_tensor(
+            input_embds
+        ), "One of two must not be None"
+
+        if torch.is_tensor(input_ids):
+            return self.bert_emb.embeddings.word_embeddings(input_ids)
+        return input_embds @ self.bert_emb.embeddings.word_embeddings.weight
+        # [b, len_, d_bert]
+
+    def encode_ans(self, input_ids=None, input_embds=None, input_masks=None):
+        # input_ids : [b, len_]
+        # input_embds : [b, len_, d_bert]
+        # input_mask : [b, len_]
+
+        assert torch.is_tensor(input_ids) or torch.is_tensor(
+            input_embds
+        ), "One of two must not be None"
+
+        encoded = (
+            self.bert_emb(
+                input_ids=input_ids,
+                attention_mask=input_masks,
+            )[0]
+            if torch.is_tensor(input_ids)
+            else self.bert_emb(
+                inputs_embeds=input_embds,
+                attention_mask=input_masks,
+            )[0]
+        )
         # [b, len_, d_bert]
 
         encoded = self.lin1(encoded)
@@ -65,13 +93,12 @@ class BertBasedEmbedding(torch_nn.Module):
 
         return encoded
 
-    def w_sum_ans(self, input_embds):
-        # input_embds : [b, d_vocab]
+    def get_output_ot(self, output):
+        # output: [b, len_ans - 1, d_vocab]
 
-        output = input_embds @ self.bert_emb.embeddings.word_embeddings.weight
-        # [b, d_bert]
+        output_ot = output @ self.bert_emb.embeddings.word_embeddings.weight
+        # [b, len_ans - 1, d_bert]
+        output_ot = self.lin1(output_ot)
+        # [b, len_ans - 1, d_hid]
 
-        output = self.lin1(output)
-        # [b, d_hid]
-
-        return output
+        return output_ot
