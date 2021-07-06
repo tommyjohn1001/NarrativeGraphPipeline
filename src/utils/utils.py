@@ -268,48 +268,6 @@ class ParallelHelper:
         return dataset
 
 
-def ipot(a1: torch.Tensor, a2: torch.Tensor, beta=2, max_iter=1000, L=1):
-    """Calculate loss based on OT."""
-
-    b, len_ans, d_hid = a1.size()
-    n = b * len_ans
-
-    # a1: [b, len_ans, d_hid]
-    # a2: [b, len_ans, d_hid]
-
-    a1, a2 = a1.view(-1, d_hid), a2.view(-1, d_hid)
-    # [n, d_hid]
-
-    # Calculate matrix C
-    a1_norm = a1 / a1.norm(dim=1)[:, None]
-    a2_norm = a2 / a2.norm(dim=1)[:, None]
-    C = a1_norm @ a2_norm.transpose(0, 1)
-    # [n, n]
-
-    sigma = torch.ones((n, 1), device=a1.device) / n
-
-    T = torch.ones((n, n), device=a1.device) / n ** 2
-    # [n, n]
-    A = torch.exp(-(C / beta))
-    # [n, n]
-
-    for _ in range(max_iter):
-        Q = A * T
-        # [n, n]
-
-        for _ in range(L):
-            d = 1 / n / (Q @ sigma)
-            sigma = 1 / n / (Q.T @ d)
-
-        d1 = torch.diag(d.squeeze(1))
-        d2 = torch.diag(sigma.squeeze(1))
-        T = d1 * Q * d2
-
-    loss = torch.sum(T * C)
-
-    return loss
-
-
 def process_sent(sent: str):
     return re.sub(r"(\[PAD\]|\[CLS\]|\[SEP\]|\[UNK\]|\[MASK\])", "", sent).strip()
 

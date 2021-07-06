@@ -2,6 +2,11 @@
 
 ### This file contains changes and modifications during developing.
 
+## July 6, 14:49
+
+- Revamp _WEAM_ and discard OT loss
+- Use _GraphBased_ reasoning module instead of _AdvancedMemory_
+
 ## July 5, 10:53
 
 - Optimizer calculating OT loss

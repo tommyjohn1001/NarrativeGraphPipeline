@@ -9,32 +9,34 @@ import torch
 
 
 from src.datamodules.narrative_datamodule import NarrativeDataModule
-from src.models.layers.reasoning_layer.memory_layer import MemoryBasedReasoning
-from src.models.layers.bertbasedembd_layer import BertBasedEmbedding
+from src.models.layers.reasoning_layer.memorygraph_layer import GraphBasedMemoryLayer
+from src.models.layers.finegrain_layer import FineGrain
 from src.models.layers.ans_infer_layer import Decoder
 from src.utils.generator import GeneratorOwn
-from src.utils.utils import ipot, get_scores
-
-EPSILON = 10e-10
+from src.utils.utils import get_scores
 
 
 class NarrativeModel(plt.LightningModule):
     def __init__(
         self,
+        batch_size: int,
         len_ques: int = 42,
         len_para: int = 170,
         len_ans: int = 15,
-        n_paras: int = 5,
-        n_layers_trans: int = 3,
-        n_heads_trans: int = 4,
+        n_nodes: int = 10,
+        n_edges: int = 40,
+        n_gru_layers: int = 5,
         d_hid: int = 64,
         d_bert: int = 768,
         d_vocab: int = 30522,
+        d_graph: int = 2048,
         lr: float = 1e-5,
         w_decay: float = 1e-2,
         switch_frequency: int = 5,
         beam_size: int = 20,
         n_gram_beam: int = 5,
+        temperature: int = 1,
+        topP: float = 0.5,
         path_bert: str = None,
         path_pred: str = None,
         path_train_pred: str = None,
@@ -48,32 +50,40 @@ class NarrativeModel(plt.LightningModule):
         self.w_decay = w_decay
         self.beam_size = beam_size
         self.n_gram_beam = n_gram_beam
-        self.switch_frequency = switch_frequency
+        self.temperature = temperature
+        self.topP = topP
         self.len_ans = len_ans
+        self.switch_frequency = switch_frequency
+
+        self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
+        self.datamodule = datamodule
 
         self.path_pred = path_pred
         self.path_train_pred = path_train_pred
 
-        self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
-        self.datamodule: NarrativeDataModule = datamodule
-
         #############################
         # Define model
         #############################
-        self.embd_layer = BertBasedEmbedding(d_bert=d_bert, path_bert=path_bert)
-        self.reasoning = MemoryBasedReasoning(
-            len_ques=len_ques,
-            len_para=len_para,
-            n_paras=n_paras,
-            n_heads_trans=n_heads_trans,
-            n_layers_trans=n_layers_trans,
-            d_hid=d_hid,
-            device=self.device,
+        self.embd_layer = FineGrain(
+            len_para,
+            n_gru_layers,
+            d_bert,
+            path_bert,
+        )
+        self.reasoning = GraphBasedMemoryLayer(
+            batch_size,
+            len_ques,
+            len_ans,
+            d_hid,
+            d_bert,
+            d_graph,
+            n_nodes,
+            n_edges,
         )
         self.ans_infer = Decoder(
             len_ans=len_ans,
+            d_bert=d_bert,
             d_vocab=d_vocab,
-            d_hid=d_hid,
             tokenizer=self.bert_tokenizer,
             embd_layer=self.embd_layer,
         )
@@ -97,26 +107,6 @@ class NarrativeModel(plt.LightningModule):
     ####################################################################
     # FOR TRAINING PURPOSE
     ####################################################################
-
-    def get_loss(self, output_mle, output_ot, ans_ids, ans_mask, gamma=0.1):
-        # output_mle: [b, d_vocab, len_ans-1]
-        # output_ot: [b, len_ans-1, d_hid]
-        # ans_ids: [b, len_ans-1]
-        # ans_mask: [b, len_ans-1]
-
-        # Calculate MLE loss
-        loss_mle = self.criterion(output_mle, ans_ids)
-
-        # Calculate OT loss
-        ans = self.embd_layer.encode_ans(input_ids=ans_ids, input_masks=ans_mask)
-        # [b, len_ans-1, d_hid]
-
-        loss_ot = ipot(output_ot, ans)
-
-        total_loss = loss_mle + gamma * loss_ot
-
-        return total_loss
-
     def get_prediction(self, output_mle, ans1_ids, ans2_ids):
         _, prediction = torch.topk(torch_F.log_softmax(output_mle, dim=1), 1, dim=1)
 
@@ -169,7 +159,7 @@ class NarrativeModel(plt.LightningModule):
         # Do reasoning
         ####################
         Y = self.reasoning(ques=ques, context=context)
-        # [b, len_ans, d_hid]
+        # [b, len_ans, d_bert]
 
         ####################
         # Generate answer
@@ -199,7 +189,7 @@ class NarrativeModel(plt.LightningModule):
         context_ids = batch["context_ids"]
         context_mask = batch["context_mask"]
 
-        output_mle, output_ot = self.model(
+        output = self.model(
             ques_ids=ques_ids,
             ques_mask=ques_mask,
             ans_ids=ans1_ids,
@@ -211,15 +201,17 @@ class NarrativeModel(plt.LightningModule):
             // self.datamodule.batch_size,
             cur_epoch=self.current_epoch,
         )
-        # output_ot: [b, len_ans - 1, d_hid]
-        # output_mle: [b, d_vocab, len_ans - 1]
+        # output: [b, d_vocab, len_ans - 1]
 
-        loss = self.get_loss(output_mle, output_ot, ans1_ids[:, 1:], ans1_mask[:, 1:])
-        prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
+        loss = self.criterion(output, ans1_ids[:, 1:])
+        prediction = self.get_prediction(output, ans1_ids, ans2_ids)
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=False)
         self.log(
             "train/t", self.ans_infer.t, on_step=True, on_epoch=False, prog_bar=False
+        )
+        self.log(
+            "train/r", self.ans_infer.r, on_step=True, on_epoch=False, prog_bar=False
         )
 
         return {"loss": loss, "pred": prediction}
@@ -242,7 +234,7 @@ class NarrativeModel(plt.LightningModule):
         context_ids = batch["context_ids"]
         context_mask = batch["context_mask"]
 
-        output_mle, output_ot = self.model(
+        output = self.model(
             ques_ids=ques_ids,
             ques_mask=ques_mask,
             ans_ids=ans1_ids,
@@ -252,10 +244,9 @@ class NarrativeModel(plt.LightningModule):
             cur_step=batch_idx,
             cur_epoch=self.current_epoch,
         )
-        # output_ot: [b, len_ans - 1, d_hid]
-        # output_mle: [b, d_vocab, len_ans - 1]
+        # output: [b, d_vocab, len_ans - 1]
 
-        loss = self.get_loss(output_mle, output_ot, ans1_ids[:, 1:], ans1_mask[:, 1:])
+        loss = self.criterion(output, ans1_ids[:, 1:])
 
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -270,7 +261,7 @@ class NarrativeModel(plt.LightningModule):
         context_ids = batch["context_ids"]
         context_mask = batch["context_mask"]
 
-        output_mle, output_ot = self.model(
+        output = self.model(
             ques_ids=ques_ids,
             ques_mask=ques_mask,
             ans_ids=ans1_ids,
@@ -279,11 +270,10 @@ class NarrativeModel(plt.LightningModule):
             context_mask=context_mask,
             is_valid=True,
         )
-        # output_ot: [b, len_ans - 1, d_hid]
-        # output_mle: [b, d_vocab, len_ans - 1]
+        # output: [b, d_vocab, len_ans - 1]
 
-        loss = self.get_loss(output_mle, output_ot, ans1_ids[:, 1:], ans1_mask[:, 1:])
-        prediction = self.get_prediction(output_mle, ans1_ids, ans2_ids)
+        loss = self.criterion(output, ans1_ids[:, 1:])
+        prediction = self.get_prediction(output, ans1_ids, ans2_ids)
 
         self.log("valid/loss", loss, on_step=False, on_epoch=True, prog_bar=False)
 

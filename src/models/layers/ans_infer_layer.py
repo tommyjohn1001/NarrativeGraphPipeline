@@ -8,7 +8,7 @@ import torch
 import numpy as np
 
 
-from src.models.layers.bertbasedembd_layer import BertBasedEmbedding
+from src.models.layers.finegrain_layer import FineGrain
 
 
 class Decoder(torch_nn.Module):
@@ -16,34 +16,40 @@ class Decoder(torch_nn.Module):
         self,
         len_ans: int = 15,
         d_vocab: int = 30522,
-        d_hid: int = 64,
+        d_bert: int = 768,
         tokenizer: BertTokenizer = None,
         embd_layer: torch.nn.Module = None,
     ):
         super().__init__()
 
         self.len_ans = len_ans
-        self.d_hid = d_hid
         self.tokenizer = tokenizer
         self.d_vocab = d_vocab
         self.device = None
+        self.epsilon = 1
+        self.bigEPSILON = 0.5
 
         self.t = 0
+        self.r = 0
 
-        self.embd_layer: BertBasedEmbedding = embd_layer
+        self.embd_layer: FineGrain = embd_layer
         bert_conf = BertConfig()
         bert_conf.is_decoder = True
-        bert_conf.hidden_size = d_hid
+
         bert_conf.add_cross_attention = True
         bert_conf.num_attention_heads = 8
         bert_conf.num_hidden_layers = 6
         self.trans_decoder = BertModel(config=bert_conf)
 
         self.lin1 = torch_nn.Sequential(
-            torch_nn.Linear(d_hid, d_hid),
+            torch_nn.Linear(d_bert, d_bert),
             torch_nn.Tanh(),
-            torch_nn.Linear(d_hid, d_vocab),
+            torch_nn.Linear(d_bert, d_vocab),
         )
+
+    ##############################################
+    # Methods for training
+    ##############################################
 
     def forward(
         self,
@@ -68,8 +74,6 @@ class Decoder(torch_nn.Module):
 
         output = self.lin1(output)
         # [b, len_, d_vocab]
-
-        # output = torch.softmax(output, dim=-1)
 
         return output
 
@@ -107,8 +111,13 @@ class Decoder(torch_nn.Module):
         # [b, d_hid]
 
         input_emds = [cls_embd.unsqueeze(1)]
+        masks = []
 
         for ith in range(1, self.len_ans):
+            ##################
+            # Choose next word for decoding
+            # based on Scheduled Sampling
+            ##################
             output = self(
                 Y=Y,
                 input_embds=torch.cat(input_emds, dim=1),
@@ -116,10 +125,24 @@ class Decoder(torch_nn.Module):
             )
             # [b, ith, d_vocab]
 
+            ##################
+            # Choose next word for decoding
+            # based on Scheduled Sampling
+            ##################
+            mask = self.get_mask(
+                output, ans_ids=ans_ids, cur_step=cur_step, max_step=max_step
+            )
+            # [b, d_vocab]
+            masks.append(mask.unsqueeze(1))
+
+            ##################
+            # Choose next word for decoding
+            # based on Scheduled Sampling
+            ##################
             if ith < self.len_ans - 1:
                 ## Apply WEAM
                 new_word = self.choose_scheduled_sampling(
-                    output=torch.softmax(output, dim=-1),
+                    output=output,
                     ans_ids=ans_ids,
                     cur_step=cur_step,
                     max_step=max_step,
@@ -129,18 +152,57 @@ class Decoder(torch_nn.Module):
 
                 input_emds.append(new_word.unsqueeze(1))
 
-        ## Get output for OT
-        output_ot = self.embd_layer.get_output_ot(output)
-        # [b, len_ans - 1, d_hid]
+        ## Get final mask and apply to output
+        mask = torch.cat(mask, dim=1)
+        # [b, len_ans - 1, d_vocab]
 
-        output_mle = output.transpose(1, 2)
+        output_sum = (
+            (output * mask).sum(dim=-1, keepdim=True).repeat(1, 1, self.d_vocab)
+        )
+        # [b, len_ans - 1, d_vocab]
+
+        output = output / output_sum
+        # [b, len_ans - 1, d_vocab]
+
+        ## Transpose to match with loss function
+        output = output.transpose(1, 2)
         # [b, d_vocab, len_ans - 1]
 
-        return output_mle, output_ot
+        return output
 
-    ##############################################
-    # Methods for scheduled sampling
-    ##############################################
+    def get_mask(
+        self,
+        output: torch.Tensor,
+        ans_ids: torch.Tensor,
+        cur_step: int,
+        max_step: int,
+    ):
+        # output: [b, len_, d_vocab]
+        # ans_ids: [b, len_ans]
+
+        ans_ids = ans_ids[:, : output.size(1)].unsqueeze(-1)
+        # [b, 1]
+        output = output[:, -1, :]
+        # [b, d_vocab]
+
+        # Calculate eta
+        self.r = np.random.binomial(1, max((cur_step / max_step, self.bigEPSILON)))
+        eps = torch.exp(torch.tensor(-self.epsilon))
+        if self.r == 0:
+            ita = eps * output.gather(dim=-1, index=ans_ids)
+        else:
+            ita = eps * torch.max(eps * output, dim=-1)[0]
+        # ita: [b]
+
+        # Calculate mask
+        mask = torch.where(
+            output > ita.unsqueeze(1).repeat(1, self.d_vocab),
+            torch.ones(output.size()).type_as(output),
+            torch.zeros(output.size()).type_as(output),
+        )
+        # [b, d_vocab]
+
+        return mask
 
     def choose_scheduled_sampling(
         self,
@@ -170,7 +232,9 @@ class Decoder(torch_nn.Module):
         new_word = (
             self.get_new_word(b, ans_ids[:, ith])
             if self.t == 0
-            else self.embd_layer.get_w_embd(input_embds=output[:, -1, :])
+            else self.embd_layer.get_w_embd(
+                input_embds=torch.softmax(output[:, -1, :], dim=-1)
+            )
         )
         # new_word: [b, d_bert]
 
@@ -203,18 +267,13 @@ class Decoder(torch_nn.Module):
             # [b, ith, d_vocab]
 
             if ith < self.len_ans - 1:
-                ## Apply WEAM
                 _, topi = torch.topk(output, k=1)
                 # [b, 1]
                 new_word = self.get_new_word(b, topi[:, -1])
 
                 input_emds.append(new_word)
 
-        ## Get output for OT
-        output_ot = self.embd_layer.get_output_ot(output)
-        # [b, len_ans - 1, d_hid]
-
-        output_mle = output.transpose(1, 2)
+        output = output.transpose(1, 2)
         # [b, d_vocab, len_ans - 1]
 
-        return output_mle, output_ot
+        return output

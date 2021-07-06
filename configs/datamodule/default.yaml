@@ -6,10 +6,6 @@ len_ques: 42
 len_para: 170
 len_para_processing: 120
 len_ans: 15
-sizes_dataset:
-  train: 32747
-  test: 10557
-  valid: 3461
 
 path_bert: ${PATH.bert}
 path_data: ${PATH.data}
