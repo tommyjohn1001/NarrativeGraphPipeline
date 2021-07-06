@@ -153,7 +153,7 @@ class Decoder(torch_nn.Module):
                 input_emds.append(new_word.unsqueeze(1))
 
         ## Get final mask and apply to output
-        mask = torch.cat(mask, dim=1)
+        mask = torch.cat(masks, dim=1)
         # [b, len_ans - 1, d_vocab]
 
         output_sum = (
@@ -180,7 +180,7 @@ class Decoder(torch_nn.Module):
         # output: [b, len_, d_vocab]
         # ans_ids: [b, len_ans]
 
-        ans_ids = ans_ids[:, : output.size(1)].unsqueeze(-1)
+        ans_ids = ans_ids[:, output.size(1) - 1].unsqueeze(-1)
         # [b, 1]
         output = output[:, -1, :]
         # [b, d_vocab]
@@ -191,12 +191,12 @@ class Decoder(torch_nn.Module):
         if self.r == 0:
             ita = eps * output.gather(dim=-1, index=ans_ids)
         else:
-            ita = eps * torch.max(eps * output, dim=-1)[0]
-        # ita: [b]
+            ita = eps * torch.max(eps * output, dim=-1)[0].unsqueeze(-1)
+        # ita: [b, 1]
 
         # Calculate mask
         mask = torch.where(
-            output > ita.unsqueeze(1).repeat(1, self.d_vocab),
+            output > ita.repeat(1, self.d_vocab),
             torch.ones(output.size()).type_as(output),
             torch.zeros(output.size()).type_as(output),
         )

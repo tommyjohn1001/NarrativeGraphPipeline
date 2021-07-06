@@ -1,11 +1,7 @@
 # @package _global_
 
 defaults:
-  - trainer: default.yaml
-  - model: default.yaml
-  - datamodule: default.yaml
-  - callbacks: default.yaml # set this to null if you don't want to use callbacks
-  - logger: tensorboard
+  - override /logger: null
 
 task: debug
 seed: 307
