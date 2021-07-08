@@ -1,10 +1,12 @@
-from typing import List
+from typing import Any
 
-from transformers import BertConfig, BertModel
+
+from transformers.models.bert.tokenization_bert import BertTokenizer
 import torch.nn as torch_nn
 import torch
 import numpy as np
 
+from src.models.layers.reasoning_layer.memory_layer import MemoryBasedReasoning
 from src.models.layers.bertbasedembd_layer import BertBasedEmbedding
 
 
@@ -14,47 +16,39 @@ class Decoder(torch_nn.Module):
         len_ans: int = 15,
         d_vocab: int = 30522,
         d_hid: int = 64,
-        cls_tok_id: int = 101,
-        embd_layer: torch.nn.Module = None,
+        tokenizer: BertTokenizer = None,
+        embd_layer: BertBasedEmbedding = None,
+        reasoning: MemoryBasedReasoning = None,
     ):
         super().__init__()
 
         self.len_ans = len_ans
         self.d_hid = d_hid
-        self.cls_tok_id = cls_tok_id
+        self.tokenizer = tokenizer
         self.d_vocab = d_vocab
-        self.t = -1
+
+        self.t = 0
 
         self.embd_layer: BertBasedEmbedding = embd_layer
-        bert_conf = BertConfig()
-        bert_conf.is_decoder = True
-        bert_conf.hidden_size = d_hid
-        bert_conf.add_cross_attention = True
-        bert_conf.num_attention_heads = 8
-        bert_conf.num_hidden_layers = 6
-        self.trans_decoder = BertModel(config=bert_conf)
-
+        self.reasoning = reasoning
         self.lin1 = torch_nn.Linear(d_hid, d_vocab)
 
     def forward(
         self,
-        Y: torch.Tensor,
-        ans_ids: torch.Tensor,
-        ans_mask: torch.Tensor,
+        ques: torch.Tensor,
+        context: torch.Tensor,
+        input_ids: torch.Tensor,
+        input_masks: torch.Tensor,
     ):
-        # Y         : [b, len_para, d_hid]
-        # ans_ids   : [b, len_]
-        # ans_mask  : [b, len_]
+        # ques: [b, len_ques, d_hid]
+        # context: [b, n_paras, len_para, d_hid]
+        # input_ids: [b, len_,]
+        # input_masks: [b, len_]
 
-        ## Embed answer
-        input_embds = self.embd_layer.encode_ans(ans_ids, ans_mask)
+        ans = self.embd_layer.encode_ans(input_ids=input_ids, input_masks=input_masks)
         # [b, len_, d_hid]
 
-        output = self.trans_decoder(
-            inputs_embeds=input_embds,
-            attention_mask=ans_mask,
-            encoder_hidden_states=Y,
-        )[0]
+        output = self.reasoning(ques=ques, context=context, ans=ans)
         # [b, len_, d_hid]
 
         output = self.lin1(output)
@@ -64,68 +58,153 @@ class Decoder(torch_nn.Module):
 
     def do_train(
         self,
-        Y: torch.Tensor,
+        ques: torch.Tensor,
+        context: torch.Tensor,
         ans_ids: torch.Tensor,
         ans_mask: torch.Tensor,
         cur_step: int,
         max_step: int,
         cur_epoch: int,
-        is_valid: bool,
     ):
-        # Y         : [b, len_para, d_hid]
+        # ques: [b, len_ques, d_hid]
+        # context: [b, n_paras, len_para, d_hid]
         # ans_ids   : [b, len_ans]
         # ans_mask  : [b, len_ans]
 
-        input_ids = torch.full((Y.size()[0], 1), self.cls_tok_id, device=Y.device)
+        b = ques.size(0)
+
+        ## Init input_embs with cls embedding
+        cls_ids = torch.full(
+            (b, 1),
+            fill_value=self.tokenizer.cls_token_id,
+            device=ques.device,
+            requires_grad=False,
+        )
         # [b, 1]
 
-        for ith in range(1, self.len_ans + 1):
-            output = self(Y=Y, ans_ids=input_ids, ans_mask=ans_mask[:, :ith])
+        input_ids = [cls_ids]
+        outputs = []
+
+        for ith in range(1, self.len_ans):
+            output = self(
+                ques=ques,
+                context=context,
+                input_ids=torch.cat(input_ids, dim=1),
+                input_masks=ans_mask[:, :ith],
+            )
             # [b, ith, d_vocab]
 
-            ## Apply Scheduling teacher
-            if ith == self.len_ans:
-                break
+            outputs.append(output[:, -1].unsqueeze(1))
 
-            _, topi = torch.topk(output[:, -1, :], k=1)
-            if is_valid:
-                chosen = topi
-            else:
-                chosen = self.choose_scheduled_sampling(
-                    output=topi,
-                    ans_ids=ans_ids,
-                    ith=ith,
+            if ith < self.len_ans - 1:
+                ## Apply WEAM
+                new_word = self.choose_scheduled_sampling(
+                    output=output[:, -1],
+                    ans_ids=ans_ids[:, ith],
                     cur_step=cur_step,
                     max_step=max_step,
                     cur_epoch=cur_epoch,
                 )
-            # [b]
-            input_ids = torch.cat((input_ids, chosen.detach()), dim=1)
+                # [b, 1]
 
-        return output.transpose(1, 2)
+                input_ids.append(new_word)
+
+        output = torch.cat(outputs, dim=1)
+        # [b, len_ans - 1, d_vocab]
+
+        ## Get output for OT
+        output_ot = self.embd_layer.get_output_ot(torch.softmax(output, dim=-1))
+        # [b, len_ans - 1, d_hid]
+
+        output_mle = output.transpose(1, 2)
+        # [b, d_vocab, len_ans - 1]
+
+        return output_mle, output_ot
+
+    ##############################################
+    # Methods for scheduled sampling
+    ##############################################
 
     def choose_scheduled_sampling(
         self,
         output: torch.Tensor,
         ans_ids: torch.Tensor,
-        ith: int,
         cur_step: int,
         max_step: int,
         cur_epoch: int,
     ):
+        # output: [b, d_vocab]
+        # ans_ids: [b]
 
-        # output: [b, 1]
-        # ans_ids   : [b, len_ans]
-        if cur_epoch < 15:
-            t = 0
-
+        # Apply Scheduled Sampling
         if cur_epoch < 20:
             t = np.random.binomial(1, min((cur_step / max_step, 0.5)))
-        elif cur_epoch < 25:
+        elif cur_epoch < 40:
             t = np.random.binomial(1, min((cur_step / max_step, 0.75)))
         else:
             t = np.random.binomial(1, cur_step / max_step)
 
         self.t = t
 
-        return ans_ids[:, ith].unsqueeze(1) if t == 0 else output
+        new_word = (
+            ans_ids.unsqueeze(-1)
+            if self.t == 0
+            else torch.topk(torch.softmax(output, dim=-1), k=1)[1]
+        )
+        # [b, 1]
+
+        return new_word
+
+    ##############################################
+    # Methods for validation/prediction
+    ##############################################
+    def do_predict(
+        self,
+        ques: torch.Tensor,
+        context: torch.Tensor,
+        ans_mask: torch.Tensor,
+    ):
+
+        b = ques.size(0)
+
+        ## Init input_embs with cls embedding
+        cls_ids = torch.full(
+            (b, 1),
+            fill_value=self.tokenizer.cls_token_id,
+            device=ques.device,
+            requires_grad=False,
+        )
+        # [b, 1]
+
+        input_ids = [cls_ids]
+        outputs = []
+
+        for ith in range(1, self.len_ans):
+            output = self(
+                ques=ques,
+                context=context,
+                input_ids=torch.cat(input_ids, dim=1),
+                input_masks=ans_mask[:, :ith],
+            )
+            # [b, ith, d_vocab]
+
+            outputs.append(output[:, -1].unsqueeze(1))
+
+            if ith < self.len_ans - 1:
+                ## Apply WEAM
+                new_word = torch.topk(torch.softmax(output, dim=-1), k=1)[1]
+                # [b, 1]
+
+                input_ids.append(new_word)
+
+        output = torch.cat(outputs, dim=1)
+        # [b, len_ans - 1, d_vocab]
+
+        ## Get output for OT
+        output_ot = self.embd_layer.get_output_ot(torch.softmax(output, dim=-1))
+        # [b, len_ans - 1, d_hid]
+
+        output_mle = output.transpose(1, 2)
+        # [b, d_vocab, len_ans - 1]
+
+        return output_mle, output_ot

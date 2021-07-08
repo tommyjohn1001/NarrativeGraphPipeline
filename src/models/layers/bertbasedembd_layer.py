@@ -2,7 +2,6 @@ from transformers import BertModel
 import transformers
 import torch.nn as torch_nn
 
-
 transformers.logging.set_verbosity_error()
 
 
@@ -54,24 +53,27 @@ class BertBasedEmbedding(torch_nn.Module):
 
         return ques, context
 
-    def encode_ans(self, input_ids):
+    def encode_ans(self, input_ids=None, input_masks=None):
         # input_ids : [b, len_]
+        # input_mask : [b, len_]
 
-        spare_p = self.bert_emb.embeddings.word_embeddings(input_ids)
+        encoded = self.bert_emb(
+            input_ids=input_ids,
+            attention_mask=input_masks,
+        )[0]
         # [b, len_, d_bert]
 
-        new_word = self.lin1(spare_p)
+        encoded = self.lin1(encoded)
         # [b, len_, d_hid]
 
-        return spare_p, new_word
+        return encoded
 
-    def w_sum_ans(self, input_embds):
-        # input_embds : [b, d_vocab]
+    def get_output_ot(self, output):
+        # output: [b, len_ans - 1, d_vocab]
 
-        output = input_embds @ self.bert_emb.embeddings.word_embeddings.weight
-        # [b, d_bert]
+        output_ot = output @ self.bert_emb.embeddings.word_embeddings.weight
+        # [b, len_ans - 1, d_bert]
+        output_ot = self.lin1(output_ot)
+        # [b, len_ans - 1, d_hid]
 
-        output = self.lin1(output)
-        # [b, d_hid]
-
-        return output
+        return output_ot

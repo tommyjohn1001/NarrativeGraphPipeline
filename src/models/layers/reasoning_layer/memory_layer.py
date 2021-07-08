@@ -1,13 +1,7 @@
-from typing import Any
-
-import torch.nn.functional as torch_f
 import torch.nn as torch_nn
 import torch
 
-from src.models.layers.reasoning_layer.utils import (
-    MemoryBasedContextRectifier,
-    MemoryBasedQuesRectifier,
-)
+from src.models.layers.reasoning_layer.utils import CustomTransEnc
 
 
 class MemoryBasedReasoning(torch_nn.Module):
@@ -15,107 +9,82 @@ class MemoryBasedReasoning(torch_nn.Module):
         self,
         len_ques: int = 42,
         len_para: int = 170,
-        n_paras: int = 5,
         n_heads_trans: int = 4,
         n_layers_trans: int = 3,
         d_hid: int = 64,
-        device: Any = "cpu",
     ):
         super().__init__()
 
         self.len_ques = len_ques
         self.len_para = len_para
-        self.n_paras = n_paras
         self.d_hid = d_hid
 
-        self.ques_rectifier = MemoryBasedQuesRectifier(
-            len_ques=len_ques,
-            d_hid=d_hid,
+        self.trans_enc_contx = CustomTransEnc(
             n_heads_trans=n_heads_trans,
             n_layers_trans=n_layers_trans,
-            device=device,
+            d_hid=d_hid,
         )
-
-        self.contx_rectifier = MemoryBasedContextRectifier(
-            len_para=len_para,
-            n_paras=n_paras,
-            d_hid=d_hid,
+        self.trans_enc_ans = CustomTransEnc(
             n_heads_trans=n_heads_trans,
             n_layers_trans=n_layers_trans,
-            device=device,
+            d_hid=d_hid,
         )
 
         self.ff1 = torch_nn.Sequential(
             torch_nn.Linear(d_hid, d_hid),
-            torch_nn.Linear(d_hid, d_hid),
-            torch_nn.Tanh(),
-            torch_nn.BatchNorm1d(len_ques),
+            torch_nn.BatchNorm1d(len_ques + len_para),
+            torch_nn.Sigmoid(),
         )
+        self.lin1 = torch_nn.Linear(d_hid, d_hid)
+        self.lin2 = torch_nn.Linear(d_hid, d_hid)
+
         self.ff2 = torch_nn.Sequential(
             torch_nn.Linear(d_hid, d_hid),
-            torch_nn.Linear(d_hid, d_hid),
-            torch_nn.Tanh(),
-            torch_nn.BatchNorm1d(len_para),
+            torch_nn.Sigmoid(),
         )
-        self.lin2 = torch_nn.Linear(d_hid, d_hid)
-        self.lin3 = torch_nn.Linear(d_hid * 2, d_hid)
+        self.lin3 = torch_nn.Linear(d_hid, d_hid)
+        self.lin4 = torch_nn.Linear(d_hid, d_hid)
 
-    def forward(self, ques, context):
+    def forward(self, ques, context, ans):
         # ques: [b, len_ques, d_hid]
         # context: [b, n_paras, len_para, d_hid]
+        # ans: [b, len_, d_hid]
 
-        b, n_paras, len_para, _ = context.size()
+        mem_contx, mem_ans = None, None
+        for ith in range(context.size(1)):
+            ##################
+            # Encode ques-para
+            ##################
+            ques_para = torch.cat((ques, context[:, ith]), dim=1)
+            # [b, len_ques+len_para, d_hid]
 
-        ###################################
-        # Rectìfy question and context
-        ###################################
-        rect_ques = self.ques_rectifier(ques=ques, context=context)
-        # [b, len_ques, d_hid]
-        rect_context, contx_rectifier = self.contx_rectifier(ques=ques, context=context)
-        # rect_context: [b, n_paras, len_para, d_hid]
-        # contx_rectifier: [b, n_paras, len_para]
+            if not torch.is_tensor(mem_contx):
+                mem_contx = ques_para
+                # [b, len_ques+len_para, d_hid]
 
-        ###################################
-        # Use CoAttention to capture
-        ###################################
-        contx_rectifier = torch.max(contx_rectifier, dim=2)[0]
-        # [b, n_paras]
-        contx_rectifier = torch_f.gumbel_softmax(
-            contx_rectifier, tau=1, hard=True, dim=1
-        )
-        # [b, n_paras]
-        contx_rectifier = contx_rectifier.view(b, n_paras, 1, 1).repeat(
-            1, 1, len_para, self.d_hid * 2
-        )
+            output = self.trans_enc_contx(query=mem_contx, key_value=ques_para)
+            # [b, len_ques+len_para, d_hid]
 
-        paras = []
-        for ith in range(n_paras):
-            para = rect_context[:, ith]
-            # [b, len_para, d_hid]
+            gate_contx = self.ff1(self.lin1(mem_contx) + self.lin2(output))
+            # [b, len_ques+len_para, d_hid]
 
-            A_i = torch.bmm(
-                self.ff1(rect_ques), self.lin2(self.ff2(para)).transpose(1, 2)
-            )
-            # [b, len_ques, len_para]
+            mem_contx = gate_contx * mem_contx + (1 - gate_contx) * ques_para
+            # [b, len_ques+len_para, d_hid]
 
-            A_q = torch.softmax(A_i, dim=1)
-            A_d = torch.softmax(A_i, dim=2)
+            ##################
+            # Encode ans
+            ##################
+            if not torch.is_tensor(mem_ans):
+                mem_ans = ans
+                # [b, len_, d_hid]
 
-            C_q = torch.bmm(A_q, para)
-            # [b, len_ques, d_hid]
+            output = self.trans_enc_ans(query=ans, key_value=mem_contx)
+            # [b, len_, d_hid]
 
-            para = torch.bmm(A_d.transpose(1, 2), torch.cat((C_q, rect_ques), dim=-1))
-            # [b, len_para, d_hid * 2]
+            gate_ans = self.ff2(self.lin3(output) + self.lin4(ans))
+            # [b, len_, d_hid]
 
-            paras.append(para.unsqueeze(1))
+            mem_ans = gate_ans * ans + (1 - gate_ans) * mem_ans
 
-        paras = torch.cat(paras, dim=1)
-        # [b, n_paras, len_para, d_hid * 2]
-
-        Y = (contx_rectifier * paras).sum(1)
-        # [b, len_para, d_hid * 2]
-
-        Y = self.lin3(Y)
-        # [b, len_para, d_hid]
-
-        return Y
+        return mem_ans
+        # [b, len_, d_hid]
