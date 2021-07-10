@@ -22,7 +22,8 @@ class NarrativeDataset(Dataset):
         len_para: int = 170,
         len_ans: int = 15,
         n_paras: int = 5,
-        num_worker: int = 1,
+        num_workers: int = 1,
+        num_shards: int = 8,
     ):
 
         self.split = split
@@ -30,7 +31,8 @@ class NarrativeDataset(Dataset):
         self.len_para = len_para
         self.len_ans = len_ans
         self.n_paras = n_paras
-        self.num_workers = num_worker
+        self.num_workers = num_workers
+        self.num_shards = num_shards
         self.size_dataset = size_dataset
 
         path_data = path_data.replace("[SPLIT]", split).replace("[SHARD]", "*")
@@ -57,12 +59,12 @@ class NarrativeDataset(Dataset):
         if torch.is_tensor(indx):
             indx = indx.tolist()
 
-        size_shard = self.size_dataset // 8
+        size_shard = self.size_dataset // self.num_workers
 
         ith_file = indx // size_shard
         indx = indx % size_shard
 
-        if ith_file == 8:
+        if ith_file == self.num_workers:
             ith_file -= 1
             indx = indx + size_shard
 
@@ -71,7 +73,6 @@ class NarrativeDataset(Dataset):
             self.curent_ith_file = ith_file
 
             # Reload dataset
-            # gc.collect()
             self.read_datasetfile(self.paths[self.curent_ith_file])
 
         return {
@@ -220,7 +221,4 @@ class NarrativeDataset(Dataset):
             self.context_mask.append(entry["context_mask"])
 
     def switch_answerability(self):
-        if self.exchange_rate == 1:
-            self.exchange_rate = 0
-        else:
-            self.exchange_rate += 0.25
+        self.exchange_rate = min((1, self.exchange_rate + 0.25))
