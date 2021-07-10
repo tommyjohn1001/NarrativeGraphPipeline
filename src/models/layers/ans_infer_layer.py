@@ -192,7 +192,7 @@ class Decoder(torch_nn.Module):
 
             if ith < self.len_ans - 1:
                 ## Apply WEAM
-                new_word = torch.topk(torch.softmax(output, dim=-1), k=1)[1]
+                new_word = torch.topk(torch.softmax(output[:, -1], dim=-1), k=1)[1]
                 # [b, 1]
 
                 input_ids.append(new_word)
