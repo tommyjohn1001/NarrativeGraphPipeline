@@ -22,6 +22,8 @@ class NarrativeDataModule(plt.LightningDataModule):
         len_ans: int = 42,
         n_paras: int = 5,
         num_workers: int = 4,
+        num_shards: int = 8,
+        **kwargs
     ):
 
         super().__init__()
@@ -37,6 +39,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         self.path_data = path_data
         self.path_bert = path_bert
         self.num_workers = num_workers
+        self.num_shards = num_shards
         self.sizes_dataset = sizes_dataset
 
         self.data_train = None
@@ -67,7 +70,8 @@ class NarrativeDataModule(plt.LightningDataModule):
             "len_para": self.len_para,
             "len_ans": self.len_ans,
             "n_paras": self.n_paras,
-            "num_worker": self.num_workers,
+            "num_workers": self.num_workers,
+            "num_shards": self.num_shards,
         }
         if stage == "fit":
             self.data_train = NarrativeDataset(

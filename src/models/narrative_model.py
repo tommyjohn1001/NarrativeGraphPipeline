@@ -24,7 +24,7 @@ class NarrativeModel(plt.LightningModule):
         len_ques: int = 42,
         len_para: int = 170,
         len_ans: int = 15,
-        n_paras: int = 5,
+        n_paras: int = 10,
         n_layers_trans: int = 3,
         n_heads_trans: int = 4,
         d_hid: int = 64,
@@ -39,6 +39,7 @@ class NarrativeModel(plt.LightningModule):
         path_pred: str = None,
         path_train_pred: str = None,
         datamodule: NarrativeDataModule = None,
+        **kwargs
     ):
 
         super().__init__()

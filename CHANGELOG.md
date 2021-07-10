@@ -2,6 +2,14 @@
 
 ### This file contains changes and modifications during developing.
 
+## July 10 2021, 18:22
+
+- Use data v4.2
+- Reorganize data (raw, processed, bert-base-uncased); move some environment-dependent paths to _.env_ file
+- Add config _num_shards_
+- Stop switching En-Hn after swithching ratio reaches 1
+- Add some configurations
+
 ## July 5, 10:53
 
 - Optimizer calculating OT loss

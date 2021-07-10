@@ -1,10 +1,7 @@
 """This file contains code reading raw data and do some preprocessing"""
-from collections import defaultdict
-from glob import glob
 import re, json, os, logging
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from rank_bm25 import BM25Okapi
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -175,7 +172,7 @@ class EntryProcessor:
     def __init__(
         self,
         nlp_spacy: spacy.Language,
-        n_paras: int = 5,
+        n_paras: int = 10,
         path_raw_data: str = None,
         path_processed_contx: str = None,
         path_data: str = None,
@@ -202,31 +199,22 @@ class EntryProcessor:
 
         return " ".join(tok)
 
-    def find_golden(self, query, wm: list) -> set:
-
-        ## Calculate score of query for each para
-        query_ = np.expand_dims(wm[query], 0)
-        wm_ = wm[:-2]
-
-        scores = cosine_similarity(query_, wm_).squeeze(0)
-
-        # Sort scores in descending and get corresponding indices
-        score_indx = [(i, s_) for i, s_ in enumerate(scores.tolist())]
-        score_indx.sort(key=lambda x: x[1], reverse=True)
-        indices = [indx for indx, _ in score_indx]
-
-        return indices[: self.n_paras]
-
     def read_processed_contx(self, id_):
         path = self.path_processed_contx.replace("[ID]", id_)
         assert os.path.isfile(path), f"Context with id {id_} not found."
         with open(path, "r") as d_file:
             return json.load(d_file)
 
+    def f_process_entry_multi(self, entries, queue):
+        """This function is used to run in parallel tailored for ParallelHelper."""
+
+        for entry in entries.itertuples():
+            queue.put(self.f_process_entry(entry))
+
     def f_process_entry(self, entry):
         """This function is used to run in parallel tailored for list mapping."""
 
-        paras = self.read_processed_contx(entry.document_id)
+        paras = np.array(self.read_processed_contx(entry.document_id))
 
         #########################
         ## Preprocess question and answer
@@ -237,35 +225,24 @@ class EntryProcessor:
         ans = ans1 + " " + ans2
 
         #########################
-        ## TfIdf vectorize
+        ## Initialize BM25
         #########################
-        tfidfvectorizer = TfidfVectorizer(
-            analyzer="word",
-            stop_words="english",
-            ngram_range=(1, 3),
-            max_features=500000,
-        )
+        tokenized_corpus = [para.split(" ") for para in paras]
+        bm25 = BM25Okapi(tokenized_corpus)
 
-        wm = tfidfvectorizer.fit_transform(paras + [ques, ans]).toarray()
-
-        ques, ans = len(wm) - 2, len(wm) - 1
+        scores_ques = bm25.get_scores(ques).argsort()[::-1][: self.n_paras]
+        scores_ans = bm25.get_scores(ans).argsort()[::-1][: self.n_paras]
 
         #########################
         ## Find golden paragraphs from
         ## question and answers
         #########################
-        golden_paras_ques = self.find_golden(ques, wm)
-        golden_paras_answ = self.find_golden(ans, wm)
-
         return {
             "doc_id": entry.document_id,
             "question": entry.question_tokenized.lower(),
-            "answers": [
-                entry.answer1_tokenized.lower(),
-                entry.answer2_tokenized.lower(),
-            ],
-            "En": [paras[i] for i in golden_paras_answ],
-            "Hn": [paras[i] for i in golden_paras_ques],
+            "answers": [ans1.lower(), ans2.lower()],
+            "En": paras[scores_ques],
+            "Hn": paras[scores_ans],
         }
 
     def trigger_process_entries(self):
@@ -303,14 +280,8 @@ class EntryProcessor:
                     )
                 else:
 
-                    def f_process_entry_multi(entries, queue):
-                        """This function is used to run in parallel tailored for ParallelHelper."""
-
-                        for entry in entries.itertuples():
-                            queue.put(self.f_process_entry(entry))
-
                     list_documents = ParallelHelper(
-                        f_process_entry_multi,
+                        self.f_process_entry_multi,
                         documents_.iloc[start_:end_],
                         lambda d, l, h: d.iloc[l:h],
                         self.num_workers,
@@ -325,103 +296,15 @@ class EntryProcessor:
                     df.to_parquet(path)
 
 
-# class VocabBuilder:
-#     def __init__(
-#         self,
-#         nlp_spacy: spacy.Language,
-#         path_processed_contx: str,
-#         path_raw_data: str,
-#         path_vocab_gen: str,
-#         path_vocab: str,
-#     ) -> None:
-#         self.nlp_spacy = nlp_spacy
-#         self.path_processed_contx = path_processed_contx
-#         self.path_raw_data = path_raw_data
-#         self.path_vocab_gen = path_vocab_gen
-#         self.path_vocab = path_vocab
-
-#         self.nlp_spacy.disable_pipes(["ner", "parser", "tagger"])
-#         self.nlp_spacy.max_length = 2500000
-
-#     def build_vocab(self):
-#         """Build vocab for generation and extended vocab"""
-
-#         vocab_gen = defaultdict(int)
-#         vocab_ex = set()
-
-#         #########################
-#         ## Read processed contexts and add words
-#         #########################
-#         paths_contx = glob(self.path_processed_contx.replace("[ID]", "*"))
-#         assert len(paths_contx) > 0
-
-#         for path in paths_contx:
-#             bag_words = set()
-
-#             with open(path, "r") as d_file:
-#                 context = json.load(d_file)
-
-#             for para in context:
-#                 for tok in self.nlp_spacy(para):
-#                     if not tok.like_url:
-#                         vocab_ex.add(tok.text)
-
-#                         if tok not in bag_words:
-#                             vocab_gen[tok.text] += 1
-#                             bag_words.add(tok.text)
-
-#         ## Filter words appearing in at least 10 contexts
-#         vocab_gen = sorted(vocab_gen.items(), key=lambda item: item[1], reverse=True)
-#         vocab_gen = set(word for word, occurence in vocab_gen if occurence >= 10)
-
-#         #########################
-#         ## Read question and answers and add words
-#         #########################
-#         qaps = pd.read_csv(f"{self.path_raw_data}/qaps.csv", header=0, index_col=None)
-
-#         for entry in qaps.itertuples():
-#             tok_ques = entry.question_tokenized.lower().split(" ")
-#             tok_ans1 = entry.answer1_tokenized.lower().split(" ")
-#             tok_ans2 = entry.answer2_tokenized.lower().split(" ")
-
-#             vocab_ex.update(tok_ques)
-#             vocab_ex.update(tok_ans1)
-#             vocab_ex.update(tok_ans2)
-
-#         #########################
-#         ## Write vocabs
-#         #########################
-#         # Write gen vocab
-#         with open(self.path_vocab_gen, "w+") as f:
-#             for word in ["[PAD]", "[CLS]", "[SEP]", "[UNK]", "[MASK]"]:
-#                 f.write(word + "\n")
-
-#             for word in vocab_gen:
-#                 f.write(word + "\n")
-
-#         # Write extended vocab
-#         with open(self.path_vocab, "w+") as f:
-#             for word in ["[PAD]", "[CLS]", "[SEP]", "[UNK]", "[MASK]"]:
-#                 f.write(word + "\n")
-
-#             for word in vocab_gen:
-#                 f.write(word + "\n")
-
-#             for word in vocab_ex - vocab_gen:
-#                 f.write(word + "\n")
-
-
 class Preprocess:
     def __init__(
         self,
         num_workers: int = 4,
         len_para_processing: int = 150,
-        n_paras: int = 5,
+        n_paras: int = 10,
         path_raw_data: str = None,
         path_processed_contx: str = None,
         path_data: str = None,
-        path_vocab_gen: str = None,
-        path_vocab: str = None,
     ):
 
         nlp_spacy = spacy.load("en_core_web_sm")
@@ -446,38 +329,20 @@ class Preprocess:
             path_data=path_data,
             num_workers=num_workers,
         )
-        # self.vocab_builder = VocabBuilder(
-        #     nlp_spacy=nlp_spacy,
-        #     path_processed_contx=path_processed_contx,
-        #     path_raw_data=path_raw_data,
-        #     path_vocab_gen=path_vocab_gen,
-        #     path_vocab=path_vocab,
-        # )
 
     def preprocess(self):
-        self.contx_processor.trigger_process_contx()
+        # self.contx_processor.trigger_process_contx()
         self.entry_processor.trigger_process_entries()
-
-        # self.vocab_builder.build_vocab()
 
 
 if __name__ == "__main__":
-    Preprocess(
-        num_workers=1,
-        len_para_processing=150,
-        n_paras=5,
-        path_raw_data="/root/NarrativeQA",
-        path_processed_contx="/root/data/proc_contx/[ID].json",
-        path_data="/root/data/[SPLIT]/data_[SHARD].parquet",
-        path_vocab_gen="/root/data/vocab_gen.txt",
-        path_vocab="/root/data/vocab.txt",
-    ).preprocess()
+    path_utils = "/Users/hoangle/Projects/VinAI/Narrative/Narrative_utils"
 
-    # Preprocess(
-    #     num_workers=8,
-    #     len_para_processing=150,
-    #     n_paras=5,
-    #     path_raw_data="/root/NarrativeQA",
-    #     path_processed_contx="data/proc_contx/[ID].json",
-    #     path_data="data/[SPLIT]/data_[SHARD].parquet",
-    # ).preprocess()
+    Preprocess(
+        num_workers=8,
+        len_para_processing=150,
+        n_paras=10,
+        path_raw_data=f"{path_utils}/raw",
+        path_processed_contx=f"{path_utils}/processed/proc_contx/[ID].json",
+        path_data=f"{path_utils}/processed/[SPLIT]/data_[SHARD].parquet",
+    ).preprocess()

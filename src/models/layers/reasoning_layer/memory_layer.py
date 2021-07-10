@@ -15,7 +15,7 @@ class MemoryBasedReasoning(torch_nn.Module):
         self,
         len_ques: int = 42,
         len_para: int = 170,
-        n_paras: int = 5,
+        n_paras: int = 10,
         n_heads_trans: int = 4,
         n_layers_trans: int = 3,
         d_hid: int = 64,
