@@ -2,6 +2,11 @@
 
 ### This file contains changes and modifications during developing.
 
+## July 20 2021, 00:03
+
+- Apply new PATH deployment strategy: Narrative_utils stores anthing and its path is in .env
+- Change some field names
+
 ## June 28 2021, 23:03
 
 - Add new Scheduled Sampling strategy

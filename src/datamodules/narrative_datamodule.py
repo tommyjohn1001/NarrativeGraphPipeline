@@ -16,21 +16,22 @@ class NarrativeDataModule(plt.LightningDataModule):
         path_bert: str,
         sizes_dataset: dict,
         batch_size: int = 5,
-        len_ques: int = 42,
-        len_para_processing: int = 150,
-        len_para: int = 170,
-        len_ans: int = 42,
+        l_q: int = 42,
+        l_c_processing: int = 150,
+        l_c: int = 170,
+        l_a: int = 42,
         n_paras: int = 5,
         num_workers: int = 4,
+        **kwargs
     ):
 
         super().__init__()
 
         self.batch_size = batch_size
-        self.len_ques = len_ques
-        self.len_para_processing = len_para_processing
-        self.len_para = len_para
-        self.len_ans = len_ans
+        self.l_q = l_q
+        self.l_c_processing = l_c_processing
+        self.l_c = l_c
+        self.l_a = l_a
         self.n_paras = n_paras
         self.path_raw_data = path_raw_data
         self.path_processed_contx = path_processed_contx
@@ -50,7 +51,7 @@ class NarrativeDataModule(plt.LightningDataModule):
         # NOTE: This is temporarily commented for saving time. Uncomment it if needing preprocessing data
         # Preprocess(
         #     num_workers=self.num_workers,
-        #     len_para_processing=self.len_para_processing,
+        #     l_c_processing=self.l_c_processing,
         #     n_paras=self.n_paras,
         #     path_raw_data=self.path_raw_data,
         #     path_processed_contx=self.path_processed_contx,
@@ -63,9 +64,9 @@ class NarrativeDataModule(plt.LightningDataModule):
         dataset_args = {
             "path_data": self.path_data,
             "path_bert": self.path_bert,
-            "len_ques": self.len_ques,
-            "len_para": self.len_para,
-            "len_ans": self.len_ans,
+            "l_q": self.l_q,
+            "l_c": self.l_c,
+            "l_a": self.l_a,
             "n_paras": self.n_paras,
             "num_worker": self.num_workers,
         }

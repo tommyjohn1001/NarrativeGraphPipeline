@@ -1,15 +1,7 @@
 from random import sample
-import glob, ast, gc, os, math
+import math
 
 from torch.utils.data.sampler import Sampler
-from torch.utils.data import Dataset
-import torch
-from transformers import BertTokenizer
-from tqdm import tqdm
-import pandas as pd, numpy as np
-
-
-from src.utils.utils import ParallelHelper
 
 
 class CustomSampler(Sampler[int]):

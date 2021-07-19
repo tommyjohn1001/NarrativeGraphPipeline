@@ -12,7 +12,7 @@ class FineGrain(torch_nn.Module):
 
     def __init__(
         self,
-        len_para: int = 170,
+        l_c: int = 170,
         n_gru_layers: int = 5,
         d_bert: int = 768,
         path_bert: str = None,
@@ -43,21 +43,21 @@ class FineGrain(torch_nn.Module):
             batch_first=True,
             bidirectional=True,
         )
-        self.lin_attn = torch_nn.Linear(d_bert * 2, len_para)
+        self.lin_attn = torch_nn.Linear(d_bert * 2, l_c)
 
     def forward(self):
         return
 
     def encode_ques_para(self, ques_ids, context_ids, ques_mask, context_mask):
-        # ques_ids          : [b, len_ques]
-        # context_ids         : [b, n_paras, len_para]
-        # ques_mask     : [b, len_ques]
-        # context_mask    : [b, n_paras, len_para]
+        # ques_ids          : [b, l_q]
+        # context_ids         : [b, n_paras, l_c]
+        # ques_mask     : [b, l_q]
+        # context_mask    : [b, n_paras, l_c]
 
-        b, n_paras, len_para = context_ids.shape
+        b, n_paras, l_c = context_ids.shape
 
         ques = self.bert_emb(input_ids=ques_ids, attention_mask=ques_mask)[0]
-        # ques  : [b, len_ques, d_bert]
+        # ques  : [b, l_q, d_bert]
 
         #########################
         # Operate CoAttention question
@@ -73,7 +73,7 @@ class FineGrain(torch_nn.Module):
             # Embed context
             ###################
             L_s = self.bert_emb(input_ids=contx, attention_mask=contx_mask)[0]
-            # L_s: [b, len_para, d_bert]
+            # L_s: [b, l_c, d_bert]
 
             ###################
             # Operate CoAttention between
@@ -82,22 +82,22 @@ class FineGrain(torch_nn.Module):
 
             # Affinity matrix
             A = torch.bmm(L_s, ques.transpose(1, 2))
-            # A: [b, len_para, len_ques]
+            # A: [b, l_c, l_q]
 
             # S_s  = torch.matmul(torch_f.softmax(A, dim=1), E_q)
             S_q = torch.bmm(torch_f.softmax(A.transpose(1, 2), dim=1), L_s)
-            # S_q: [b, len_ques, d_bert]
+            # S_q: [b, l_q, d_bert]
 
             X = torch.bmm(torch_f.softmax(A, dim=1), S_q)
             C_s = self.biGRU_CoAttn(X)[0]
 
             C_s = torch.unsqueeze(C_s, 1)
-            # C_s: [b, 1, len_para, d_bert]
+            # C_s: [b, 1, l_c, d_bert]
 
             paragraphs.append(C_s)
 
         context = torch.cat((paragraphs), dim=1)
-        # [b, n_paras, len_para, d_bert]
+        # [b, n_paras, l_c, d_bert]
 
         #########################
         # Reduce 'context' by applying attentive method
@@ -106,9 +106,9 @@ class FineGrain(torch_nn.Module):
         ques_ = torch.mean(ques, dim=1)
         # [b, d_bert]
 
-        context_ = context.reshape(-1, len_para, self.d_bert)
+        context_ = context.reshape(-1, l_c, self.d_bert)
         # paras_len = torch.sum(paras_mask, dim=2).reshape(-1).to("cpu")
-        # context_    : [b*n_paras, len_para, d_bert]
+        # context_    : [b*n_paras, l_c, d_bert]
         # paras_mask: [b*n_paras]
 
         # for i in range(paras_len.shape[0]):
@@ -120,7 +120,7 @@ class FineGrain(torch_nn.Module):
         # tmp     = self.biGRU_mask(tmp)[0]
         # context_  = torch_nn.utils.rnn.pad_packed_sequence(tmp, batch_first=True)[0]
         context_ = self.biGRU_mask(context_)[0]
-        # [b*n_paras, len_para, d_bert]
+        # [b*n_paras, l_c, d_bert]
 
         paras_first = context_[:, 0, :].reshape(b, n_paras, -1)
         # [b, n_paras, d_bert]
@@ -130,10 +130,10 @@ class FineGrain(torch_nn.Module):
         selector = torch.cat((q_, paras_first), dim=2)
         # [b, n_paras, d_bert*2]
         selector = self.lin_attn(selector)
-        # [b, n_paras, len_para]
+        # [b, n_paras, l_c]
 
         selector = selector.unsqueeze(3).repeat(1, 1, 1, self.d_bert)
-        # [b, n_paras, len_para, d_bert]
+        # [b, n_paras, l_c, d_bert]
 
         context = torch.sum(context * selector, dim=2)
         # [b, n_paras, d_bert]
@@ -141,8 +141,8 @@ class FineGrain(torch_nn.Module):
         return ques, context
 
     def encode_ans(self, ans_ids, ans_mask):
-        # ans_ids           : [b, len_ans]
-        # ans_mask      : [b, len_ans]
+        # ans_ids           : [b, l_a]
+        # ans_mask      : [b, l_a]
 
         return self.bert_emb(input_ids=ans_ids, attention_mask=ans_mask)[0]
-        # [b, len_ans, d_bert]
+        # [b, l_a, d_bert]

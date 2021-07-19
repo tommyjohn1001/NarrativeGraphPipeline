@@ -1,96 +1,18 @@
 # @package _global_
 
-# to execute this experiment run:
-# python run.py experiment=example_full.yaml
-
 defaults:
-  - override /trainer: null # override trainer to null so it's not loaded from main config defaults...
-  - override /model: null
-  - override /datamodule: null
-  - override /callbacks: null
   - override /logger: null
-
-# we override default configurations with nulls to prevent them from loading at all
-# instead we define all modules and their paths directly in this config,
-# so everything is stored in one place
 
 task: debug
 
 seed: 307
-
-batch_size: 16
+batch_size: 5
+num_workers: 1
 
 trainer:
-  _target_: pytorch_lightning.Trainer
-
   gpus: 1
   min_epochs: 1
-  max_epochs: 40
-  auto_lr_find: False
-  terminate_on_nan: true
-  auto_scale_batch_size: False
-
-  weights_summary: "top"
-  progress_bar_refresh_rate: 10
-  resume_from_checkpoint: ${PATH.checkpoint}
-  check_val_every_n_epoch: 5
-
-model:
-  _target_: src.models.narrative_model.NarrativeModel
-
-  batch_size: ${batch_size}
-  len_ques: 42
-  len_para: 170
-  len_ans: 15
-  n_nodes: 10
-  n_edges: 40
-  n_gru_layers: 5
-  d_hid: 64
-  d_bert: 768
-  d_vocab: 30522
-  d_graph: 2048
-  lr: 1e-4
-  w_decay: 0.0005
-  beam_size: 20
-  n_gram_beam: 8
-  temperature: 1.4
-  topP: 0.5
-
-  path_bert: ${PATH.bert}
-  path_pred: ${PATH.pred}
-  path_train_pred: ${PATH.train_pred}
 
 datamodule:
-  _target_: src.datamodules.narrative_datamodule.NarrativeDataModule
-
   batch_size: ${batch_size}
   num_workers: ${num_workers}
-  len_ques: 42
-  len_para: 170
-  len_ans: 15
-  len_para_processing: 150
-  sizes_dataset:
-    train: 32747
-    test: 10557
-    valid: 3461
-
-  path_bert: ${PATH.bert}
-  path_data: ${PATH.data}
-  path_raw_data: ${PATH.raw_data}
-  path_processed_contx: ${PATH.processed_contx}
-
-callbacks:
-  model_checkpoint:
-    _target_: pytorch_lightning.callbacks.ModelCheckpoint
-    monitor: "valid/loss"
-    save_top_k: 2
-    save_last: True
-    mode: "min"
-    dirpath: "checkpoints/"
-    filename: "narrative-{epoch:02d}"
-
-  early_stopping:
-    _target_: pytorch_lightning.callbacks.EarlyStopping
-    monitor: "valid/loss"
-    patience: 10
-    mode: "min"

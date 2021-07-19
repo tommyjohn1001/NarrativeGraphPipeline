@@ -3,7 +3,6 @@ import json, re
 
 
 from transformers import AdamW, BertTokenizer
-from transformers.modeling_outputs import Seq2SeqLMOutput
 import pytorch_lightning as plt
 import torch.nn.functional as torch_F
 import torch.nn as torch_nn
@@ -26,9 +25,9 @@ class NarrativeModel(plt.LightningModule):
     def __init__(
         self,
         batch_size: int,
-        len_ques: int = 42,
-        len_para: int = 170,
-        len_ans: int = 15,
+        l_q: int = 42,
+        l_c: int = 170,
+        l_a: int = 15,
         n_nodes: int = 10,
         n_edges: int = 40,
         n_gru_layers: int = 5,
@@ -47,6 +46,7 @@ class NarrativeModel(plt.LightningModule):
         path_pred: str = None,
         path_train_pred: str = None,
         datamodule: NarrativeDataModule = None,
+        **kwargs
     ):
 
         super().__init__()
@@ -58,7 +58,7 @@ class NarrativeModel(plt.LightningModule):
         self.n_gram_beam = n_gram_beam
         self.temperature = temperature
         self.topP = topP
-        self.len_ans = len_ans
+        self.l_a = l_a
         self.switch_frequency = switch_frequency
 
         self.bert_tokenizer = BertTokenizer.from_pretrained(path_bert)
@@ -71,15 +71,15 @@ class NarrativeModel(plt.LightningModule):
         # Define model
         #############################
         self.embd_layer = FineGrain(
-            len_para,
+            l_c,
             n_gru_layers,
             d_bert,
             path_bert,
         )
         self.reasoning = GraphBasedMemoryLayer(
             batch_size,
-            len_ques,
-            len_ans,
+            l_q,
+            l_a,
             d_hid,
             d_bert,
             d_graph,
@@ -87,7 +87,7 @@ class NarrativeModel(plt.LightningModule):
             n_edges,
         )
         self.ans_infer = BertDecoder(
-            len_ans=len_ans,
+            l_a=l_a,
             d_bert=d_bert,
             d_vocab=d_vocab,
             cls_tok_id=self.bert_tokenizer.cls_token_id,
@@ -106,9 +106,7 @@ class NarrativeModel(plt.LightningModule):
         #############################
         # Define things
         #############################
-        self.criterion = torch_nn.CrossEntropyLoss(
-            ignore_index=self.bert_tokenizer.pad_token_id
-        )
+        self.criterion = torch_nn.CrossEntropyLoss()
 
     ####################################################################
     # FOR TRAINING PURPOSE
@@ -173,15 +171,14 @@ class NarrativeModel(plt.LightningModule):
         context_mask,
         cur_step: int = 0,
         max_step: int = 0,
-        cur_epoch: int = 0,
         is_valid: bool = False,
     ):
-        # ques       : [b, len_ques]
-        # ques_mask  : [b, len_ques]
-        # context_ids  : [b, n_paras, len_para]
-        # context_mask : [b, n_paras, len_para]
-        # ans_ids        : [b, len_ans]
-        # ans_mask   : [b, len_ans]
+        # ques       : [b, l_q]
+        # ques_mask  : [b, l_q]
+        # context_ids  : [b, n_paras, l_c]
+        # context_mask : [b, n_paras, l_c]
+        # ans_ids        : [b, l_a]
+        # ans_mask   : [b, l_a]
 
         ####################
         # Embed question, context and answer
@@ -192,15 +189,15 @@ class NarrativeModel(plt.LightningModule):
             ques_mask=ques_mask,
             context_mask=context_mask,
         )
-        # ques : [b, len_ques, d_bert]
+        # ques : [b, l_q, d_bert]
         # context: [b, n_paras, d_bert]
-        # ans  : [b, len_ans, d_bert]
+        # ans  : [b, l_a, d_bert]
 
         ####################
         # Do reasoning
         ####################
         Y = self.reasoning(ques, context)
-        # [b, len_ans, d_bert]
+        # [b, l_a, d_bert]
 
         ####################
         # Generate answer
@@ -211,10 +208,9 @@ class NarrativeModel(plt.LightningModule):
             ans_mask=ans_mask,
             cur_step=cur_step,
             max_step=max_step,
-            cur_epoch=cur_epoch,
             is_valid=is_valid,
         )
-        # [b, d_vocab, len_ans]
+        # [b, d_vocab, l_a]
 
         return pred
 
@@ -237,9 +233,8 @@ class NarrativeModel(plt.LightningModule):
             cur_step=batch_idx,
             max_step=self.datamodule.data_train.size_dataset
             // self.datamodule.batch_size,
-            cur_epoch=self.current_epoch,
         )
-        # pred: [b, d_vocab, len_ans]
+        # pred: [b, d_vocab, l_a]
 
         loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
@@ -284,7 +279,7 @@ class NarrativeModel(plt.LightningModule):
         pred = self.model(
             ques_ids, ques_mask, ans1_ids, ans1_mask, context_ids, context_mask
         )
-        # [b, d_vocab, len_ans]
+        # [b, d_vocab, l_a]
 
         loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
@@ -310,7 +305,7 @@ class NarrativeModel(plt.LightningModule):
             context_mask=context_mask,
             is_valid=True,
         )
-        # pred: [b, len_ans, d_vocab]
+        # pred: [b, l_a, d_vocab]
 
         loss = self.criterion(pred[:, :, :-1], ans1_ids[:, 1:])
 
@@ -370,10 +365,10 @@ class NarrativeModel(plt.LightningModule):
     # FOR PREDICTION PURPOSE
     #########################################
     def forward(self, ques_ids, ques_mask, context_ids, context_mask):
-        # ques_ids       : [b, len_ques]
-        # ques_mask  : [b, len_ques]
-        # context_ids      : [b, n_paras, len_para]
-        # context_mask : [b, n_paras, len_para]
+        # ques_ids       : [b, l_q]
+        # ques_mask  : [b, l_q]
+        # context_ids      : [b, n_paras, l_c]
+        # context_mask : [b, n_paras, l_c]
 
         b = ques_ids.size(0)
 
@@ -386,25 +381,25 @@ class NarrativeModel(plt.LightningModule):
             ques_mask=ques_mask,
             context_mask=context_mask,
         )
-        # ques : [b, len_ques, d_bert]
+        # ques : [b, l_q, d_bert]
         # context: [b, n_paras, d_bert]
 
         ####################
         # Do reasoning
         ####################
         Y = self.reasoning(ques, context)
-        # [b, len_ans, d_bert]
+        # [b, l_a, d_bert]
 
         ####################
         # Generate answer
         ####################
         # NOTE: This belongs to BeamSearchHugging and therefore is commented
         # Y_ = Y.repeat_interleave(self.beam_size, dim=0)
-        # # [b_, len_ans, d_bert]
+        # # [b_, l_a, d_bert]
 
         # generator = BeamSearchHuggingface(
         #     batch_size=b,
-        #     max_length=self.len_ans,
+        #     max_length=self.l_a,
         #     num_beams=self.beam_size,
         #     temperature=self.temperature,
         #     no_repeat_ngram_size=self.n_gram_beam,
@@ -457,7 +452,7 @@ class NarrativeModel(plt.LightningModule):
 
     def generate_own(self, decoder_input_ids, encoder_outputs):
         # decoder_input_ids: [seq_len<=200]
-        # encoder_outputs  : [len_ans, d_bert]
+        # encoder_outputs  : [l_a, d_bert]
 
         decoder_input_ids = (
             torch.LongTensor(decoder_input_ids)

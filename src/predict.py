@@ -36,14 +36,27 @@ def predict(config: DictConfig) -> Optional[float]:
     if "seed" in config:
         seed_everything(config.seed)
 
+    # Read path of utils from ENV and set up basic paths
+    path_utils = os.environ.get("NARRATIVE_UTILS")
+    paths = {
+        "path_raw_data": f"{path_utils}/raw",
+        "path_processed_contx": f"{path_utils}/processed/proc_contx/[ID].json",
+        "path_data": f"{path_utils}/processed/[SPLIT]/data_[SHARD].parquet",
+        "path_bert": f"{path_utils}/bert-base-uncased",
+    }
+
     # Init Lightning datamodule
     log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
+    datamodule: LightningDataModule = hydra.utils.instantiate(
+        config.datamodule, **paths
+    )
 
     # Init Lightning model
     log.info(f"Instantiating model <{config.model._target_}>")
     model_kwargs = {"datamodule": datamodule}
-    model: LightningModule = hydra.utils.instantiate(config.model, **model_kwargs)
+    model: LightningModule = hydra.utils.instantiate(
+        config.model, **model_kwargs, **paths
+    )
 
     # Init Lightning callbacks
     callbacks: List[Callback] = []

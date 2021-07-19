@@ -1,9 +1,9 @@
 _target_: src.models.narrative_model.NarrativeModel
 
 batch_size: ${batch_size}
-len_ques: 42
-len_para: 170
-len_ans: 15
+l_q: 42
+l_c: 170
+l_a: 15
 n_nodes: 10
 n_edges: 40
 n_gru_layers: 5
@@ -19,6 +19,4 @@ n_gram_beam: 8
 temperature: 1.4
 topP: 0.5
 
-path_bert: ${PATH.bert}
-path_pred: ${PATH.pred}
 path_train_pred: ${PATH.train_pred}

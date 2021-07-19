@@ -23,7 +23,7 @@ class ContextProcessor:
     def __init__(
         self,
         nlp_spacy: spacy.Language,
-        len_para_processing: int = 150,
+        l_c_processing: int = 150,
         path_raw_data: str = None,
         path_processed_contx: str = None,
         path_data: str = None,
@@ -32,7 +32,7 @@ class ContextProcessor:
         self.nlp_spacy = nlp_spacy
 
         self.path_raw_data = path_raw_data
-        self.len_para_processing = len_para_processing
+        self.l_c_processing = l_c_processing
         self.path_processed_contx = path_processed_contx
         self.path_data = path_data
         self.num_workers = num_workers
@@ -74,9 +74,9 @@ class ContextProcessor:
 
     def export_para(self, toks):
         para_ = []
-        for i in range(0, len(toks), self.len_para_processing):
+        for i in range(0, len(toks), self.l_c_processing):
             tmp = re.sub(
-                r"( |\t){2,}", " ", " ".join(toks[i : i + self.len_para_processing])
+                r"( |\t){2,}", " ", " ".join(toks[i : i + self.l_c_processing])
             ).strip()
             para_.append(tmp)
 
@@ -136,9 +136,9 @@ class ContextProcessor:
                 ## Tokenize
                 tokens_ = [tok.text for tok in self.nlp_spacy(sent)]
                 tokens = np.concatenate((tokens, tokens_))
-            len_para = self.len_para_processing
-            for i in range(0, len(tokens), len_para):
-                para = " ".join(tokens[i : i + len_para])
+            l_c = self.l_c_processing
+            for i in range(0, len(tokens), l_c):
+                para = " ".join(tokens[i : i + l_c])
                 para = re.sub(r"( |\t){2,}", " ", para).strip()
 
                 paras = np.concatenate((paras, [para]))
@@ -415,7 +415,7 @@ class Preprocess:
     def __init__(
         self,
         num_workers: int = 4,
-        len_para_processing: int = 150,
+        l_c_processing: int = 150,
         n_paras: int = 5,
         path_raw_data: str = None,
         path_processed_contx: str = None,
@@ -432,7 +432,7 @@ class Preprocess:
         ######################
         self.contx_processor = ContextProcessor(
             nlp_spacy=nlp_spacy,
-            len_para_processing=len_para_processing,
+            l_c_processing=l_c_processing,
             path_raw_data=path_raw_data,
             path_processed_contx=path_processed_contx,
             path_data=path_data,
@@ -464,7 +464,7 @@ class Preprocess:
 if __name__ == "__main__":
     Preprocess(
         num_workers=1,
-        len_para_processing=150,
+        l_c_processing=150,
         n_paras=5,
         path_raw_data="/root/NarrativeQA",
         path_processed_contx="/root/data/proc_contx/[ID].json",
@@ -475,7 +475,7 @@ if __name__ == "__main__":
 
     # Preprocess(
     #     num_workers=8,
-    #     len_para_processing=150,
+    #     l_c_processing=150,
     #     n_paras=5,
     #     path_raw_data="/root/NarrativeQA",
     #     path_processed_contx="data/proc_contx/[ID].json",

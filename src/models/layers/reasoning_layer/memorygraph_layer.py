@@ -10,8 +10,8 @@ class GraphBasedMemoryLayer(torch_nn.Module):
     def __init__(
         self,
         batch_size: int = 5,
-        len_ques: int = 42,
-        len_ans: int = 15,
+        l_q: int = 42,
+        l_a: int = 15,
         d_hid: int = 64,
         d_bert: int = 768,
         d_graph: int = 2048,
@@ -29,12 +29,12 @@ class GraphBasedMemoryLayer(torch_nn.Module):
         self.graph = GraphLayer(d_hid, d_graph, n_nodes)
         self.memory = Memory(batch_size, n_nodes, d_hid, n_edges)
 
-        self.lin2 = torch_nn.Linear(d_bert, len_ans, bias=False)
-        self.lin3 = torch_nn.Linear(len_ques, n_nodes, bias=False)
+        self.lin2 = torch_nn.Linear(d_bert, l_a, bias=False)
+        self.lin3 = torch_nn.Linear(l_q, n_nodes, bias=False)
         self.lin4 = torch_nn.Linear(d_hid, d_bert, bias=False)
 
     def forward(self, ques, context):
-        # ques : [b, len_ques, d_bert]
+        # ques : [b, l_q, d_bert]
         # context: [b, n_paras, d_bert]
 
         (
@@ -114,12 +114,12 @@ class GraphBasedMemoryLayer(torch_nn.Module):
         # for tensor 'Y'
         ######################################
         ques = self.lin2(ques)
-        # [b, len_ques, len_ans]
+        # [b, l_q, l_a]
         attentive = self.lin3(ques.transpose(1, 2))
-        # [b, len_ans, n_nodes]
+        # [b, l_a, n_nodes]
 
         Y = torch.bmm(torch.softmax(attentive, dim=2), Y)
-        # [b, len_ans, d_hid]
+        # [b, l_a, d_hid]
         # print(f"Y softmax       max: {Y.max()}")
         # print(f"Y softmax       min: {Y.min()}")
         # print(f"===================================================")
@@ -128,7 +128,7 @@ class GraphBasedMemoryLayer(torch_nn.Module):
         #     raise ValueError()
 
         Y = self.lin4(Y)
-        # [b, len_ans, d_bert]
+        # [b, l_a, d_bert]
 
         return Y
 

@@ -18,17 +18,17 @@ class NarrativeDataset(Dataset):
         path_data: str,
         path_bert: str,
         size_dataset: int,
-        len_ques: int = 42,
-        len_para: int = 170,
-        len_ans: int = 15,
+        l_q: int = 42,
+        l_c: int = 170,
+        l_a: int = 15,
         n_paras: int = 5,
         num_worker: int = 1,
     ):
 
         self.split = split
-        self.len_ques = len_ques
-        self.len_para = len_para
-        self.len_ans = len_ans
+        self.l_q = l_q
+        self.l_c = l_c
+        self.l_a = l_a
         self.n_paras = n_paras
         self.num_workers = num_worker
         self.size_dataset = size_dataset
@@ -107,7 +107,7 @@ class NarrativeDataset(Dataset):
         encoded = self.tokenizer(
             entry.question,
             padding="max_length",
-            max_length=self.len_ques,
+            max_length=self.l_q,
             truncation=True,
             return_tensors="np",
             return_token_type_ids=False,
@@ -128,7 +128,7 @@ class NarrativeDataset(Dataset):
             ans1,
             padding="max_length",
             truncation=True,
-            max_length=self.len_ans,
+            max_length=self.l_a,
             return_tensors="np",
             return_token_type_ids=False,
         )
@@ -139,7 +139,7 @@ class NarrativeDataset(Dataset):
             ans2,
             padding="max_length",
             truncation=True,
-            max_length=self.len_ans,
+            max_length=self.l_a,
             return_tensors="np",
             return_token_type_ids=False,
         )
@@ -154,14 +154,14 @@ class NarrativeDataset(Dataset):
         contx = self._get_context(En, Hn)
 
         # Process context
-        context_ids = np.zeros((self.n_paras, self.len_para), dtype=np.int)
-        context_mask = np.zeros((self.n_paras, self.len_para), dtype=np.int)
+        context_ids = np.zeros((self.n_paras, self.l_c), dtype=np.int)
+        context_mask = np.zeros((self.n_paras, self.l_c), dtype=np.int)
         for ith, para in enumerate(contx):
             encoded = self.tokenizer(
                 para,
                 padding="max_length",
                 truncation=True,
-                max_length=self.len_para,
+                max_length=self.l_c,
                 return_tensors="np",
                 return_token_type_ids=False,
             )

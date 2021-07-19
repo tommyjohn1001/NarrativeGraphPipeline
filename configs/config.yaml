@@ -42,12 +42,6 @@ ignore_warnings: True
 ### THIS SECTION IS FOR PATHS
 #############################################################
 PATH:
-  raw_data: /root/NarrativeQA
-  processed_contx: ${data_dir}/proc_contx/[ID].json
-  data: ${data_dir}/[SPLIT]/data_[SHARD].parquet
-
-  bert: ${data_dir}/bert-base-uncased
-
   train_pred: ${data_dir}/train_prediction.json
   pred: ${data_dir}/prediction.json
   checkpoint: ${work_dir}/logs/last_best/last.ckpt

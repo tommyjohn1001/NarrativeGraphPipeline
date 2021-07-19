@@ -11,7 +11,7 @@ from src.models.layers.finegrain_layer import FineGrain
 class BertDecoder(torch_nn.Module):
     def __init__(
         self,
-        len_ans: int = 15,
+        l_a: int = 15,
         d_bert: int = 768,
         d_vocab: int = 30552,
         cls_tok_id: int = 101,
@@ -20,7 +20,7 @@ class BertDecoder(torch_nn.Module):
         super().__init__()
 
         self.cls_tok_id = cls_tok_id
-        self.len_ans = len_ans
+        self.l_a = l_a
         self.t = -1
 
         self.embd_layer: FineGrain = embd_layer
@@ -39,7 +39,7 @@ class BertDecoder(torch_nn.Module):
         )
 
     def forward(self, Y: torch.Tensor, ans_ids: torch.Tensor, ans_mask: torch.Tensor):
-        # Y       : [b, len_ans, d_bert]
+        # Y       : [b, l_a, d_bert]
         # ans_ids : [b, seq_len]
         # ans_mask: [b, seq_len]
 
@@ -48,10 +48,10 @@ class BertDecoder(torch_nn.Module):
         output = self.decoder(
             inputs_embeds=input_embds, attention_mask=ans_mask, encoder_hidden_states=Y
         )[0]
-        # [b, len_ans, 768]
+        # [b, l_a, 768]
 
         pred = self.ff(output)
-        # [b, len_ans, d_vocab]
+        # [b, l_a, d_vocab]
 
         return pred
 
@@ -62,22 +62,21 @@ class BertDecoder(torch_nn.Module):
         ans_mask: torch.Tensor,
         cur_step: int,
         max_step: int,
-        cur_epoch: int,
         is_valid: bool = False,
     ):
-        # Y         : [b, len_para, d_hid]
-        # ans_ids   : [b, len_ans]
-        # ans_mask  : [b, len_ans]
+        # Y         : [b, l_c, d_hid]
+        # ans_ids   : [b, l_a]
+        # ans_mask  : [b, l_a]
 
         input_ids = torch.full((Y.size()[0], 1), self.cls_tok_id, device=Y.device)
         # [b, 1]
 
-        for ith in range(1, self.len_ans + 1):
+        for ith in range(1, self.l_a + 1):
             output = self(Y=Y, ans_ids=input_ids, ans_mask=ans_mask[:, :ith])
             # [b, ith, d_vocab]
 
             ## Apply Scheduling teacher
-            if ith == self.len_ans:
+            if ith == self.l_a:
                 break
 
             _, topi = torch.topk(output[:, -1, :], k=1)
@@ -90,7 +89,6 @@ class BertDecoder(torch_nn.Module):
                     ith=ith,
                     cur_step=cur_step,
                     max_step=max_step,
-                    cur_epoch=cur_epoch,
                 )
             # [b]
             input_ids = torch.cat((input_ids, chosen.detach()), dim=1)
@@ -103,22 +101,12 @@ class BertDecoder(torch_nn.Module):
         ans_ids: torch.Tensor,
         ith: int,
         cur_step: int,
-        max_step: int,
-        cur_epoch: int,
+        max_step,
     ):
 
         # output: [b, 1]
-        # ans_ids   : [b, len_ans]
-        if cur_epoch < 15:
-            t = 0
+        # ans_ids   : [b, l_a]
 
-        if cur_epoch < 20:
-            t = np.random.binomial(1, min((cur_step / max_step, 0.5)))
-        elif cur_epoch < 25:
-            t = np.random.binomial(1, min((cur_step / max_step, 0.75)))
-        else:
-            t = np.random.binomial(1, cur_step / max_step)
+        self.t = np.random.binomial(1, cur_step / max_step)
 
-        self.t = t
-
-        return ans_ids[:, ith].unsqueeze(1) if t == 0 else output
+        return ans_ids[:, ith].unsqueeze(1) if self.t == 0 else output
